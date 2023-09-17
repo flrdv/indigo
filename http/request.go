@@ -39,7 +39,7 @@ type Request struct {
 	conn           net.Conn
 	wasHijacked    bool
 	clearParamsMap bool
-	response       Response
+	builder        *Builder
 }
 
 // NewRequest returns a new instance of request object and body gateway
@@ -48,7 +48,7 @@ type Request struct {
 // is invalid, we need to render a response using request method, but appears
 // that default method is a null-value (proto.Unknown)
 func NewRequest(
-	ctx context.Context, hdrs *headers.Headers, query query.Query, response Response,
+	ctx context.Context, hdrs *headers.Headers, query query.Query, builder *Builder,
 	conn net.Conn, body *Body, paramsMap Params, disableParamsMapClearing bool,
 ) *Request {
 	request := &Request{
@@ -62,7 +62,7 @@ func NewRequest(
 		body:           body,
 		conn:           conn,
 		clearParamsMap: !disableParamsMapClearing,
-		response:       response,
+		builder:        builder,
 	}
 
 	return request
@@ -96,8 +96,8 @@ func (r *Request) Body() *Body {
 }
 
 // Respond returns Response builder, associated with the request
-func (r *Request) Respond() Response {
-	return r.response
+func (r *Request) Respond() *Builder {
+	return r.builder
 }
 
 // Hijack the connection. Request body will be implicitly read (so if you need it you
@@ -123,7 +123,7 @@ func (r *Request) WasHijacked() bool {
 func (r *Request) Clear() (err error) {
 	r.Query.Set(nil)
 	r.Ctx = r.defaultCtx
-	r.response = r.response.Clear()
+	r.builder = r.builder.Clear()
 
 	if err = r.body.Reset(); err != nil {
 		return err
@@ -147,5 +147,9 @@ func (r *Request) Clear() (err error) {
 
 // Respond returns a response object of request
 func Respond(request *Request) Response {
-	return request.response
+	return request.builder
+}
+
+func Error(request *Request, err error) Response {
+	return request.Respond().WithError(err)
 }

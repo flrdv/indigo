@@ -45,12 +45,12 @@ func BenchmarkRenderer_Response(b *testing.B) {
 	}
 
 	hdrs := headers.NewHeaders()
-	response := http.NewResponse()
+	response := http.NewBuilder()
 	bodyReader := http1.NewBodyReader(
 		dummy.NewNopClient(), http1.NewChunkedBodyParser(settings.Default().Body), decoder.NewManager(0),
 	)
 	request := http.NewRequest(
-		context.Background(), hdrs, query.NewQuery(nil), http.NewResponse(), dummy.NewNopConn(),
+		context.Background(), hdrs, query.NewQuery(nil), http.NewBuilder(), dummy.NewNopConn(),
 		http.NewBody(bodyReader), nil, false,
 	)
 	client := NopClientWriter{}
@@ -100,7 +100,7 @@ func BenchmarkRenderer_Response(b *testing.B) {
 	})
 
 	b.Run("101SwitchingProtocol", func(b *testing.B) {
-		resp := http.NewResponse().WithCode(status.SwitchingProtocols)
+		resp := http.NewBuilder().WithCode(status.SwitchingProtocols)
 		buff := make([]byte, 0, 128)
 		renderer := NewEngine(buff, nil, nil)
 		b.ReportAllocs()

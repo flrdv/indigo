@@ -84,6 +84,12 @@ const (
 	NetworkAuthenticationRequired Code = 511 // RFC 6585, 6
 )
 
+// IsError returns bool, based on whether c belongs to the period [400, 600).
+// In other words, if code belongs to 4xx or 5xx
+func (c Code) IsError() bool {
+	return c >= 400 && c < 600
+}
+
 // Text returns a text for the HTTP status code. It returns the empty
 // string if the code is unknown.
 func Text(code Code) Status {

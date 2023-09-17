@@ -7,7 +7,7 @@ import (
 )
 
 func BenchmarkResponse_WithError(b *testing.B) {
-	resp := NewResponse()
+	resp := NewBuilder()
 	knownErr := status.ErrBadRequest
 	unknownErr := errors.New("some crap happened, unable to recover")
 

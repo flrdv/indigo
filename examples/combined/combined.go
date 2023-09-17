@@ -41,7 +41,7 @@ func IndexSay(request *http.Request) http.Response {
 
 	body, err := request.Body().Full()
 	if err != nil {
-		return request.Respond().WithError(err)
+		return err
 	}
 
 	fmt.Println("Somebody said:", strconv.Quote(string(body)))

@@ -43,7 +43,7 @@ func getRequestWithReader(chunked bool, body ...[]byte) (*http.Request, http.Bod
 	}
 
 	request := http.NewRequest(
-		context.Background(), hdrs, query.Query{}, http.NewResponse(),
+		context.Background(), hdrs, query.Query{}, http.NewBuilder(),
 		dummy.NewNopConn(), reqBody, nil, false,
 	)
 	request.ContentLength = contentLength
@@ -108,7 +108,7 @@ func TestBodyReader_Plain(t *testing.T) {
 
 		hdrs := headers.NewHeaders()
 		request := http.NewRequest(
-			context.Background(), hdrs, query.Query{}, http.NewResponse(),
+			context.Background(), hdrs, query.Query{}, http.NewBuilder(),
 			dummy.NewNopConn(), nil, nil, false,
 		)
 		request.ContentLength = buffSize

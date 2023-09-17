@@ -7,7 +7,7 @@ import (
 
 func TestResponse(t *testing.T) {
 	t.Run("JSON", func(t *testing.T) {
-		response := NewResponse()
+		response := NewBuilder()
 		m := []int{1, 2, 3}
 		resp, err := response.WithJSON(m)
 		require.NoError(t, err)

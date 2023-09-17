@@ -28,7 +28,7 @@ func TestRoute(t *testing.T) {
 		request := getRequest()
 		request.Method = method.GET
 		request.Path = "/"
-		resp := r.OnRequest(request)
+		resp := asBuilder(request, r.OnRequest(request))
 		require.Equal(t, status.OK, resp.Code)
 	})
 
@@ -38,7 +38,7 @@ func TestRoute(t *testing.T) {
 		request := getRequest()
 		request.Method = method.POST
 		request.Path = "/"
-		resp := r.OnRequest(request)
+		resp := asBuilder(request, r.OnRequest(request))
 		require.Equal(t, status.OK, resp.Code)
 	})
 
@@ -48,7 +48,7 @@ func TestRoute(t *testing.T) {
 		request := getRequest()
 		request.Method = method.POST
 		request.Path = "/hello"
-		resp := r.OnRequest(request)
+		resp := asBuilder(request, r.OnRequest(request))
 		require.Equal(t, status.OK, resp.Code)
 	})
 
@@ -57,7 +57,7 @@ func TestRoute(t *testing.T) {
 		request.Method = method.HEAD
 		request.Path = "/"
 
-		resp := r.OnRequest(request)
+		resp := asBuilder(request, r.OnRequest(request))
 		// we have not registered any HEAD-method handler yet, so GET method
 		// is expected to be called (but without body)
 		require.Equal(t, status.OK, resp.Code)
@@ -183,7 +183,7 @@ func TestRouter_MethodNotAllowed(t *testing.T) {
 	request := getRequest()
 	request.Path = "/"
 	request.Method = method.POST
-	response := r.OnRequest(request)
+	response := asBuilder(request, r.OnRequest(request))
 	require.Equal(t, status.MethodNotAllowed, response.Code)
 }
 
@@ -197,28 +197,28 @@ func TestRouter_RouteError(t *testing.T) {
 
 	t.Run("status.ErrBadRequest", func(t *testing.T) {
 		request := getRequest()
-		resp := r.OnError(request, status.ErrBadRequest)
+		resp := asBuilder(request, r.OnError(request, status.ErrBadRequest))
 		require.Equal(t, status.Teapot, resp.Code)
 		require.Equal(t, status.ErrBadRequest.Error(), string(resp.Body))
 	})
 
 	t.Run("status.ErrURIDecoding (also bad request)", func(t *testing.T) {
 		request := getRequest()
-		resp := r.OnError(request, status.ErrURIDecoding)
+		resp := asBuilder(request, r.OnError(request, status.ErrURIDecoding))
 		require.Equal(t, status.Teapot, resp.Code)
 		require.Equal(t, status.ErrURIDecoding.Error(), string(resp.Body))
 	})
 
 	t.Run("unregistered http error", func(t *testing.T) {
 		request := getRequest()
-		resp := r.OnError(request, status.ErrNotImplemented)
+		resp := asBuilder(request, r.OnError(request, status.ErrNotImplemented))
 		require.Equal(t, status.NotImplemented, resp.Code)
 		require.Equal(t, status.ErrNotImplemented.Error(), string(resp.Body))
 	})
 
 	t.Run("unregistered ordinary error", func(t *testing.T) {
 		request := getRequest()
-		resp := r.OnError(request, errors.New("any error text here"))
+		resp := asBuilder(request, r.OnError(request, errors.New("any error text here")))
 		require.Equal(t, status.InternalServerError, resp.Code)
 		require.Empty(t, string(resp.Body))
 	})
@@ -234,8 +234,17 @@ func TestRouter_RouteError(t *testing.T) {
 		}, AllErrors)
 
 		request := getRequest()
-		resp := r.OnError(request, status.ErrNotImplemented)
+		resp := asBuilder(request, r.OnError(request, status.ErrNotImplemented))
 		require.Equal(t, int(status.Teapot), int(resp.Code))
 		require.Equal(t, fromUniversal, string(resp.Body))
 	})
+}
+
+func asBuilder(req *http.Request, resp http.Response) *http.Builder {
+	builder, ok := resp.(*http.Builder)
+	if !ok {
+		builder = req.Respond().WithError(resp)
+	}
+
+	return builder
 }

@@ -56,7 +56,7 @@ func getParser() (httpparser.HTTPRequestsParser, *http.Request) {
 	objPool := pool.NewObjectPool[[]string](20)
 	body := NewBodyReader(dummy.NewNopClient(), NewChunkedBodyParser(s.Body), decoder.NewManager(0))
 	request := http.NewRequest(
-		context.Background(), headers.NewHeaders(), query.Query{}, http.NewResponse(),
+		context.Background(), headers.NewHeaders(), query.Query{}, http.NewBuilder(),
 		dummy.NewNopConn(), http.NewBody(body), nil, false,
 	)
 

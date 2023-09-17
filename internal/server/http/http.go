@@ -23,7 +23,7 @@ type BenchmarkServer interface {
 	RunOnce(tcp.Client, *http.Request, *http.Body, render.Engine, parser.HTTPRequestsParser)
 }
 
-var upgrading = http.NewResponse().
+var upgrading = http.NewBuilder().
 	WithCode(status.SwitchingProtocols).
 	WithHeader("Connection", "upgrade")
 
@@ -62,7 +62,7 @@ func (h *httpServer) RunOnce(
 			err = status.ErrCloseConnection
 		}
 
-		_ = renderer.Write(req.Proto, req, h.router.OnError(req, err), client)
+		_ = renderer.Write(req.Proto, req, ensureBuilder(req, h.router.OnError(req, err)), client)
 		return false
 	}
 
@@ -80,7 +80,7 @@ func (h *httpServer) RunOnce(
 
 		client.Unread(extra)
 		body.Init(req)
-		response := h.router.OnRequest(req)
+		response := ensureBuilder(req, h.router.OnRequest(req))
 
 		if req.WasHijacked() {
 			return false
@@ -91,7 +91,7 @@ func (h *httpServer) RunOnce(
 			// This may affect cases, when the error occurred during rendering an attachment,
 			// but server anyway cannot recognize them, so the only thing will be done here
 			// is notifying the router about disconnection
-			h.router.OnError(req, status.ErrCloseConnection)
+			_ = h.router.OnError(req, status.ErrCloseConnection)
 			return false
 		}
 
@@ -101,13 +101,13 @@ func (h *httpServer) RunOnce(
 			// abusing the fact, that req.Clear() will return an error ONLY if socket error
 			// occurred while reading.
 			// TODO: what's if the error lays in decoding? This should somehow be processed
-			h.router.OnError(req, status.ErrCloseConnection)
+			_ = h.router.OnError(req, status.ErrCloseConnection)
 			return false
 		}
 	case parser.Error:
 		// as fatal error already happened and connection will anyway be closed, we don't
 		// care about any socket errors anymore
-		_ = renderer.Write(req.Proto, req, h.router.OnError(req, err), client)
+		_ = renderer.Write(req.Proto, req, ensureBuilder(req, h.router.OnError(req, err)), client)
 		p.Release()
 		return false
 	default:
@@ -115,4 +115,13 @@ func (h *httpServer) RunOnce(
 	}
 
 	return true
+}
+
+func ensureBuilder(req *http.Request, resp http.Response) *http.Builder {
+	builder, ok := resp.(*http.Builder)
+	if !ok {
+		builder = req.Respond().WithError(resp)
+	}
+
+	return builder
 }

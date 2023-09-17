@@ -28,7 +28,7 @@ func getEngine(defaultHeaders map[string][]string) *engine {
 
 func newRequest() *http.Request {
 	return http.NewRequest(
-		context.Background(), headers.NewHeaders(), query.Query{}, http.NewResponse(), dummy.NewNopConn(),
+		context.Background(), headers.NewHeaders(), query.Query{}, http.NewBuilder(), dummy.NewNopConn(),
 		http.NewBody(http1.NewBodyReader(
 			dummy.NewNopClient(),
 			http1.NewChunkedBodyParser(settings.Default().Body),
@@ -56,7 +56,7 @@ func TestEngine_Write(t *testing.T) {
 	t.Run("NoHeaders", func(t *testing.T) {
 		renderer := getEngine(nil)
 		writer := new(accumulativeClient)
-		require.NoError(t, renderer.Write(proto.HTTP11, request, http.NewResponse(), writer))
+		require.NoError(t, renderer.Write(proto.HTTP11, request, http.NewBuilder(), writer))
 		resp, err := stdhttp.ReadResponse(bufio.NewReader(bytes.NewBuffer(writer.Data)), stdreq)
 		require.Equal(t, 200, resp.StatusCode)
 		require.Equal(t, 2, len(resp.Header))
@@ -68,7 +68,7 @@ func TestEngine_Write(t *testing.T) {
 	})
 
 	testWithHeaders := func(t *testing.T, renderer Engine) {
-		response := http.NewResponse().
+		response := http.NewBuilder().
 			WithHeader("Hello", "nether").
 			WithHeader("Something", "special", "here")
 
@@ -114,7 +114,7 @@ func TestEngine_Write(t *testing.T) {
 	t.Run("HeadResponse", func(t *testing.T) {
 		const body = "Hello, world!"
 		renderer := getEngine(nil)
-		response := http.NewResponse().WithBody(body)
+		response := http.NewBuilder().WithBody(body)
 		request := newRequest()
 		request.Method = method.HEAD
 
@@ -133,14 +133,14 @@ func TestEngine_Write(t *testing.T) {
 
 	t.Run("HTTP/1.0_NoKeepAlive", func(t *testing.T) {
 		renderer := getEngine(nil)
-		response := http.NewResponse()
+		response := http.NewBuilder()
 		err := renderer.Write(proto.HTTP10, request, response, new(accumulativeClient))
 		require.EqualError(t, err, status.ErrCloseConnection.Error())
 	})
 
 	t.Run("CustomCodeAndStatus", func(t *testing.T) {
 		renderer := getEngine(nil)
-		response := http.NewResponse().WithCode(600)
+		response := http.NewBuilder().WithCode(600)
 
 		writer := new(accumulativeClient)
 		require.NoError(t, renderer.Write(proto.HTTP11, request, response, writer))
@@ -154,7 +154,7 @@ func TestEngine_Write(t *testing.T) {
 		const body = "Hello, world!"
 		reader := strings.NewReader(body)
 		renderer := getEngine(nil)
-		response := http.NewResponse().WithAttachment(reader, reader.Len())
+		response := http.NewBuilder().WithAttachment(reader, reader.Len())
 
 		writer := new(accumulativeClient)
 		require.NoError(t, renderer.Write(proto.HTTP11, request, response, writer))
@@ -172,7 +172,7 @@ func TestEngine_Write(t *testing.T) {
 		const body = "Hello, world!"
 		reader := strings.NewReader(body)
 		renderer := getEngine(nil)
-		response := http.NewResponse().WithAttachment(reader, 0)
+		response := http.NewBuilder().WithAttachment(reader, 0)
 
 		writer := new(accumulativeClient)
 		require.NoError(t, renderer.Write(proto.HTTP11, request, response, writer))
@@ -189,7 +189,7 @@ func TestEngine_Write(t *testing.T) {
 		const body = "Hello, world!"
 		reader := strings.NewReader(body)
 		renderer := getEngine(nil)
-		response := http.NewResponse().WithAttachment(reader, reader.Len())
+		response := http.NewBuilder().WithAttachment(reader, reader.Len())
 		request.Method = method.HEAD
 		stdreq, err := stdhttp.NewRequest(stdhttp.MethodHead, "/", nil)
 		require.NoError(t, err)
@@ -216,14 +216,14 @@ func TestEngine_PreWrite(t *testing.T) {
 		request := newRequest()
 		request.Proto = proto.HTTP10
 		request.Upgrade = proto.HTTP11
-		preResponse := http.NewResponse().
+		preResponse := http.NewBuilder().
 			WithCode(status.SwitchingProtocols).
 			WithHeader("Connection", "upgrade").
 			WithHeader("Upgrade", "HTTP/1.1")
 		renderer.PreWrite(request.Proto, preResponse)
 
 		writer := new(accumulativeClient)
-		require.NoError(t, renderer.Write(proto.HTTP11, request, http.NewResponse(), writer))
+		require.NoError(t, renderer.Write(proto.HTTP11, request, http.NewBuilder(), writer))
 
 		r := &stdhttp.Request{
 			Method:     stdhttp.MethodGet,

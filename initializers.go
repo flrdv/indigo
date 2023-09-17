@@ -50,7 +50,7 @@ func newRequest(
 ) *http.Request {
 	q := query.NewQuery(headers.NewHeaders())
 	hdrs := headers.NewPreallocHeaders(s.Headers.Number.Default)
-	response := http.NewResponse()
+	response := http.NewBuilder()
 	params := make(http.Params)
 	body := http.NewBody(r)
 
