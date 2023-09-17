@@ -62,7 +62,7 @@ func (h *httpServer) RunOnce(
 			err = status.ErrCloseConnection
 		}
 
-		_ = renderer.Write(req.Proto, req, ensureBuilder(req, h.router.OnError(req, err)), client)
+		_ = renderer.Write(req.Proto, req, http.AsBuilder(req, h.router.OnError(req, err)), client)
 		return false
 	}
 
@@ -80,7 +80,7 @@ func (h *httpServer) RunOnce(
 
 		client.Unread(extra)
 		body.Init(req)
-		response := ensureBuilder(req, h.router.OnRequest(req))
+		response := http.AsBuilder(req, h.router.OnRequest(req))
 
 		if req.WasHijacked() {
 			return false
@@ -107,7 +107,7 @@ func (h *httpServer) RunOnce(
 	case parser.Error:
 		// as fatal error already happened and connection will anyway be closed, we don't
 		// care about any socket errors anymore
-		_ = renderer.Write(req.Proto, req, ensureBuilder(req, h.router.OnError(req, err)), client)
+		_ = renderer.Write(req.Proto, req, http.AsBuilder(req, h.router.OnError(req, err)), client)
 		p.Release()
 		return false
 	default:
@@ -115,13 +115,4 @@ func (h *httpServer) RunOnce(
 	}
 
 	return true
-}
-
-func ensureBuilder(req *http.Request, resp http.Response) *http.Builder {
-	builder, ok := resp.(*http.Builder)
-	if !ok {
-		builder = req.Respond().WithError(resp)
-	}
-
-	return builder
 }

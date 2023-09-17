@@ -97,7 +97,7 @@ func TestMiddlewares(t *testing.T) {
 		request.Method = method.GET
 		request.Path = "/"
 
-		response := asBuilder(request, r.OnRequest(request))
+		response := http.AsBuilder(request, r.OnRequest(request))
 		require.Equal(t, status.OK, response.Code)
 		require.Equal(t, []middleware{m1, m2}, stack.Chain())
 		stack.Clear()
@@ -108,7 +108,7 @@ func TestMiddlewares(t *testing.T) {
 		request.Method = method.GET
 		request.Path = "/api/v1/hello"
 
-		response := asBuilder(request, r.OnRequest(request))
+		response := http.AsBuilder(request, r.OnRequest(request))
 		require.Equal(t, status.OK, response.Code)
 		require.Equal(t, []middleware{m1, m3, m4, m6}, stack.Chain())
 		stack.Clear()
@@ -119,7 +119,7 @@ func TestMiddlewares(t *testing.T) {
 		request.Method = method.GET
 		request.Path = "/api/v2/world"
 
-		response := asBuilder(request, r.OnRequest(request))
+		response := http.AsBuilder(request, r.OnRequest(request))
 		require.Equal(t, status.OK, response.Code)
 		require.Equal(t, []middleware{m1, m3, m5, m7}, stack.Chain())
 		stack.Clear()

@@ -219,42 +219,11 @@ func (b *Builder) Clear() *Builder {
 	return b
 }
 
-// bodyIOWriter is an implementation of io.Writer fob *Builder body
-type bodyIOWriter struct {
-	builder  *Builder
-	readBuff []byte
-}
-
-func newBodyIOWriter(builder *Builder) *bodyIOWriter {
-	return &bodyIOWriter{
-		builder: builder,
-	}
-}
-
-func (b *bodyIOWriter) Write(data []byte) (n int, err error) {
-	b.builder.Body = append(b.builder.Body, data...)
-
-	return len(data), nil
-}
-
-func (b *bodyIOWriter) ReadFrom(reader io.Reader) (n int64, err error) {
-	const readBuffSize = 2048
-
-	if len(b.readBuff) == 0 {
-		b.readBuff = make([]byte, readBuffSize)
+func AsBuilder(request *Request, resp Response) *Builder {
+	builder, ok := resp.(*Builder)
+	if !ok {
+		builder = request.Respond().WithError(resp)
 	}
 
-	for {
-		readN, readErr := reader.Read(b.readBuff)
-		_, _ = b.Write(b.readBuff[:n]) // bodyIOWriteb.Write always returns n=len(data) and err=nil
-		n += int64(readN)
-
-		switch readErr {
-		case nil:
-		case io.EOF:
-			return n, nil
-		default:
-			return n, readErr
-		}
-	}
+	return builder
 }
