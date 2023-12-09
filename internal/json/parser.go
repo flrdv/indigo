@@ -29,7 +29,7 @@ func NewJSON[T any]() *JSON[T] {
 }
 
 func (j *JSON[T]) Parse(input string) (result T, err error) {
-	_ = jscan.Scan(input, func(i *jscan.Iterator[string]) (exit bool) {
+	jsonErr := jscan.Scan(input, func(i *jscan.Iterator[string]) (exit bool) {
 		if len(i.Key()) == 0 {
 			return false
 		}
@@ -55,5 +55,13 @@ func (j *JSON[T]) Parse(input string) (result T, err error) {
 		return false
 	})
 
+	if jsonErr.IsErr() {
+		err = jsonErr
+	}
+
 	return result, err
+}
+
+func (j *JSON[T]) Reset() {
+	j.buffer.Clear()
 }
