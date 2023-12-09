@@ -5,7 +5,7 @@ type attrsMap struct {
 }
 
 func (a *attrsMap) Lookup(key string) (field fieldData, found bool) {
-	if len(key) > len(a.buckets) {
+	if len(key) > len(a.buckets)-1 {
 		return fieldData{}, false
 	}
 
