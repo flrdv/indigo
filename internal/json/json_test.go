@@ -19,15 +19,18 @@ func TestJSON(t *testing.T) {
 		"Boah": "any text here",
 		"Something": "some text inside of the string",
 		"Nothing": "Hello, world!",
-		123: "This must never appear"
+		"any string": "This must never appear"
 	}
 	`
-	parser := NewJSON[myJSONModel]()
-	model, err := parser.Parse(j)
-	require.NoError(t, err)
-	assert.Equal(t, "some text inside of the string", model.Something)
-	assert.Equal(t, "Hello, world!", model.Nothing)
-	assert.Equal(t, "any text here", model.Boah)
+
+	t.Run("myJSONModel", func(t *testing.T) {
+		parser := NewJSON[myJSONModel]()
+		model, err := parser.Parse(j)
+		require.NoError(t, err)
+		assert.Equal(t, "some text inside of the string", model.Something)
+		assert.Equal(t, "Hello, world!", model.Nothing)
+		assert.Equal(t, "any text here", model.Boah)
+	})
 }
 
 func BenchmarkJSON(b *testing.B) {
@@ -36,7 +39,7 @@ func BenchmarkJSON(b *testing.B) {
 		"Boah": 857,
 		"Something": "okay, let it be",
 		"Nothing": "Hello, world!",
-		123: "This must never appear"
+		"any string": "This must never appear"
 	}
 	`
 
@@ -49,6 +52,7 @@ func BenchmarkJSON(b *testing.B) {
 
 		for i := 0; i < b.N; i++ {
 			m, _ = parser.Parse(j)
+			parser.Reset()
 		}
 	})
 
