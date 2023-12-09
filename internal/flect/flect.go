@@ -56,6 +56,15 @@ func (m Model[T]) Instantiate(values []Field) T {
 	return zero
 }
 
+func (m Model[T]) Write(into T, field Field) (out T, written bool) {
+	f, found := m.offsets.Lookup(field.Key)
+	if !found {
+		return into, false
+	}
+	memcpy(unsafe.Add(unsafe.Pointer(&into), f.Offset), field.Data, f.Size)
+	return into, true
+}
+
 func (m Model[T]) write(into T, key string, val unsafe.Pointer, size uintptr) T {
 	field, found := m.offsets.Lookup(key)
 	if !found {
