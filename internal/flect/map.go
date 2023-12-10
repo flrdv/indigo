@@ -1,43 +1,43 @@
 package flect
 
-type attrsMap struct {
-	buckets []attrsMapBucket
+type attrsMap[T any] struct {
+	buckets []attrsMapBucket[T]
 }
 
-func (a *attrsMap) Lookup(key string) (field fieldData, found bool) {
+func (a *attrsMap[T]) Lookup(key string) (field Field[T], found bool) {
 	if len(key) > len(a.buckets)-1 {
-		return fieldData{}, false
+		return field, false
 	}
 
 	for _, entry := range a.buckets[len(key)] {
 		if entry.Key == key {
-			return entry.Value, true
+			return entry.Field, true
 		}
 	}
 
-	return fieldData{}, false
+	return field, false
 }
 
-func (a *attrsMap) Insert(key string, value fieldData) {
+func (a *attrsMap[T]) Insert(key string, field Field[T]) {
 	if len(a.buckets) < len(key) {
 		a.grow(len(key))
 	}
 
-	a.buckets[len(key)] = append(a.buckets[len(key)], attrsMapEntry{
+	a.buckets[len(key)] = append(a.buckets[len(key)], attrsMapEntry[T]{
 		Key:   key,
-		Value: value,
+		Field: field,
 	})
 }
 
-func (a *attrsMap) grow(n int) {
-	newBuckets := make([]attrsMapBucket, n+1)
+func (a *attrsMap[T]) grow(n int) {
+	newBuckets := make([]attrsMapBucket[T], n+1)
 	copy(newBuckets, a.buckets)
 	a.buckets = newBuckets
 }
 
-type attrsMapBucket []attrsMapEntry
+type attrsMapBucket[T any] []attrsMapEntry[T]
 
-type attrsMapEntry struct {
+type attrsMapEntry[T any] struct {
 	Key   string
-	Value fieldData
+	Field Field[T]
 }

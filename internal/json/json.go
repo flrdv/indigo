@@ -30,7 +30,13 @@ func NewJSON[T any]() *JSON[T] {
 
 func (j *JSON[T]) Parse(input string) (result T, err error) {
 	jsonErr := jscan.Scan(input, func(i *jscan.Iterator[string]) (exit bool) {
-		if len(i.Key()) == 0 {
+		key := i.Key()
+		if len(i.Key()) == 0 || i.ValueType() != jscan.ValueTypeString {
+			return false
+		}
+
+		field, found := j.model.Field(key[1 : len(key)-1])
+		if !found {
 			return false
 		}
 
@@ -41,16 +47,7 @@ func (j *JSON[T]) Parse(input string) (result T, err error) {
 
 		value := uf.B2S(j.buffer.Finish())
 		value = value[1 : len(value)-1]
-		key := i.Key()
-
-		var written bool
-		result, written = j.model.Write(result, flect.Field{
-			Key:  key[1 : len(key)-1], // get rid of quotes
-			Data: unsafe.Pointer(&value),
-		})
-		if !written {
-			j.buffer.Discard(j.buffer.SegmentLength())
-		}
+		result = field.WriteUFP(result, unsafe.Pointer(&value))
 
 		return false
 	})

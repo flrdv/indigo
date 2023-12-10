@@ -8,7 +8,7 @@ import (
 func BenchmarkModelFiller(b *testing.B) {
 	b.Run("full", func(b *testing.B) {
 		model := NewModel[myStruct]()
-		fields := []Field{
+		fields := []Attr{
 			{"A", uptr(5)},
 			{"B", uptr(32769)},
 			{"C", uptr(67108864)},
@@ -18,7 +18,7 @@ func BenchmarkModelFiller(b *testing.B) {
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
-			_ = model.Instantiate(fields)
+			_ = Instantiate(model, fields...)
 		}
 	})
 
@@ -30,7 +30,8 @@ func BenchmarkModelFiller(b *testing.B) {
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
-			_ = model.WriteUInt32(myStruct{}, "C", 67108864)
+			field, _ := model.Field("C")
+			_ = field.WriteUInt32(myStruct{}, 67108864)
 		}
 	})
 }

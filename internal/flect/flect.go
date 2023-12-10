@@ -5,17 +5,8 @@ import (
 	"unsafe"
 )
 
-type Field struct {
-	Key  string
-	Data unsafe.Pointer
-}
-
-type fieldData struct {
-	Size, Offset uintptr
-}
-
 type Model[T any] struct {
-	offsets *attrsMap
+	attrs *attrsMap[T]
 }
 
 func NewModel[T any]() Model[T] {
@@ -26,90 +17,97 @@ func NewModel[T any]() Model[T] {
 	}
 
 	model := Model[T]{
-		offsets: new(attrsMap),
+		attrs: new(attrsMap[T]),
 	}
 
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
-		model.offsets.Insert(field.Name, fieldData{
-			Size:   field.Type.Size(),
-			Offset: field.Offset,
+		model.attrs.Insert(field.Name, Field[T]{
+			meta: fieldMeta{
+				Size:   field.Type.Size(),
+				Offset: field.Offset,
+			},
 		})
 	}
 
 	return model
 }
 
-func (m Model[T]) Instantiate(values []Field) T {
-	var zero T
-	zeroUPtr := unsafe.Pointer(&zero)
+func (m Model[T]) Field(key string) (Field[T], bool) {
+	return m.attrs.Lookup(key)
+}
 
-	for _, value := range values {
-		field, found := m.offsets.Lookup(value.Key)
+type Attr struct {
+	Key   string
+	Value unsafe.Pointer
+}
+
+func Instantiate[T any](model Model[T], attrs ...Attr) T {
+	var zero T
+
+	for _, attr := range attrs {
+		field, found := model.Field(attr.Key)
 		if !found {
 			continue
 		}
-		fieldPtr := unsafe.Add(zeroUPtr, field.Offset)
-		memcpy(fieldPtr, value.Data, field.Size)
+
+		zero = field.WriteUFP(zero, attr.Value)
 	}
 
 	return zero
 }
 
-func (m Model[T]) Write(into T, field Field) (out T, written bool) {
-	f, found := m.offsets.Lookup(field.Key)
-	if !found {
-		return into, false
-	}
-	memcpy(unsafe.Add(unsafe.Pointer(&into), f.Offset), field.Data, f.Size)
-	return into, true
+type Field[T any] struct {
+	meta fieldMeta
 }
 
-func (m Model[T]) write(into T, key string, val unsafe.Pointer, size uintptr) T {
-	field, found := m.offsets.Lookup(key)
-	if !found {
-		return into
-	}
-	memcpy(unsafe.Add(unsafe.Pointer(&into), field.Offset), val, size)
+func (f Field[T]) WriteUFP(into T, src unsafe.Pointer) T {
+	dst := unsafe.Add(unsafe.Pointer(&into), f.meta.Offset)
+	memcpy(dst, src, f.meta.Size)
+
 	return into
 }
 
-func (m Model[T]) WriteUInt8(into T, key string, num uint8) T {
-	return m.write(into, key, unsafe.Pointer(&num), unsafe.Sizeof(num))
+func (f Field[T]) WriteUInt8(into T, num uint8) T {
+	return f.WriteUFP(into, unsafe.Pointer(&num))
 }
 
-func (m Model[T]) WriteUInt16(into T, key string, num uint16) T {
-	return m.write(into, key, unsafe.Pointer(&num), unsafe.Sizeof(num))
+func (f Field[T]) WriteUInt16(into T, num uint16) T {
+	return f.WriteUFP(into, unsafe.Pointer(&num))
 }
 
-func (m Model[T]) WriteUInt32(into T, key string, num uint32) T {
-	return m.write(into, key, unsafe.Pointer(&num), unsafe.Sizeof(num))
+func (f Field[T]) WriteUInt32(into T, num uint32) T {
+	return f.WriteUFP(into, unsafe.Pointer(&num))
 }
 
-func (m Model[T]) WriteUInt64(into T, key string, num uint64) T {
-	return m.write(into, key, unsafe.Pointer(&num), unsafe.Sizeof(num))
+func (f Field[T]) WriteUInt64(into T, num uint64) T {
+	return f.WriteUFP(into, unsafe.Pointer(&num))
 }
 
-func (m Model[T]) WriteInt8(into T, key string, num int8) T {
-	return m.write(into, key, unsafe.Pointer(&num), unsafe.Sizeof(num))
+func (f Field[T]) WriteInt8(into T, num int8) T {
+	return f.WriteUFP(into, unsafe.Pointer(&num))
 }
 
-func (m Model[T]) WriteInt16(into T, key string, num int16) T {
-	return m.write(into, key, unsafe.Pointer(&num), unsafe.Sizeof(num))
+func (f Field[T]) WriteInt16(into T, num int16) T {
+	return f.WriteUFP(into, unsafe.Pointer(&num))
 }
 
-func (m Model[T]) WriteInt32(into T, key string, num int32) T {
-	return m.write(into, key, unsafe.Pointer(&num), unsafe.Sizeof(num))
+func (f Field[T]) WriteInt32(into T, num int32) T {
+	return f.WriteUFP(into, unsafe.Pointer(&num))
 }
 
-func (m Model[T]) WriteInt64(into T, key string, num int64) T {
-	return m.write(into, key, unsafe.Pointer(&num), unsafe.Sizeof(num))
+func (f Field[T]) WriteInt64(into T, num int64) T {
+	return f.WriteUFP(into, unsafe.Pointer(&num))
 }
 
-func (m Model[T]) WriteString(into T, key string, value string) T {
-	return m.write(into, key, unsafe.Pointer(&value), unsafe.Sizeof(value))
+func (f Field[T]) WriteString(into T, value string) T {
+	return f.WriteUFP(into, unsafe.Pointer(&value))
 }
 
 func memcpy(dst, src unsafe.Pointer, size uintptr) {
 	copy(unsafe.Slice((*byte)(dst), size), unsafe.Slice((*byte)(src), size))
+}
+
+type fieldMeta struct {
+	Size, Offset uintptr
 }
