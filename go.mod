@@ -1,6 +1,6 @@
 module github.com/indigo-web/indigo
 
-go 1.18
+go 1.22
 
 require (
 	github.com/indigo-web/chunkedbody v0.1.0

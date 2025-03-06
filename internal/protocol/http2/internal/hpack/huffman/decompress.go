@@ -39,14 +39,12 @@ func newPtrTree() *PtrNode {
 	return root
 }
 
-func Decompress(data []byte) (string, bool) {
-	var buff []byte
-
+func Decompress(data, out []byte) ([]byte, bool) {
 	node := Tree
 	allSet := true
 
 	for _, b := range data {
-		for i := 0; i < 8; i++ {
+		for i := uint8(0); i < 8; i++ {
 			if b&(0x80>>i) != 0 {
 				node = node.Right
 			} else {
@@ -55,16 +53,16 @@ func Decompress(data []byte) (string, bool) {
 			}
 
 			if node == nil {
-				return "", false
+				return out[:0], false
 			}
 
 			if node.IsLeaf {
-				buff = append(buff, node.Char)
+				out = append(out, node.Char)
 				node = Tree
 				allSet = true
 			}
 		}
 	}
 
-	return string(buff), allSet
+	return out, allSet
 }
