@@ -2,7 +2,6 @@ package huffman
 
 import (
 	"github.com/stretchr/testify/require"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -48,50 +47,23 @@ func TestHuffman(t *testing.T) {
 	})
 }
 
-func BenchmarkDecompressCommon(b *testing.B) {
-	shortSrc := strings.Repeat("abcd", 64/len("abcd"))
-	short := Compress(shortSrc, []byte{})
-	mediumSrc := strings.Repeat("abcd", 4096/len("abcd"))
-	medium := Compress(mediumSrc, []byte{})
-	longSrc := strings.Repeat("abcd", 65536/len("abcd"))
-	long := Compress(longSrc, []byte{})
-	out := make([]byte, 0, len(longSrc))
-
-	b.Run(strconv.Itoa(len(shortSrc)), func(b *testing.B) {
-		b.SetBytes(int64(len(short)))
-		b.ResetTimer()
-
-		for range b.N {
-			_, _ = Decompress(short, out)
-		}
-	})
-
-	b.Run(strconv.Itoa(len(mediumSrc)), func(b *testing.B) {
-		b.SetBytes(int64(len(medium)))
-		b.ResetTimer()
-
-		for range b.N {
-			_, _ = Decompress(medium, out)
-		}
-	})
-
-	b.Run(strconv.Itoa(len(longSrc)), func(b *testing.B) {
-		b.SetBytes(int64(len(long)))
-		b.ResetTimer()
-
-		for range b.N {
-			_, _ = Decompress(long, out)
-		}
-	})
-}
-
-func BenchmarkCompressCommon(b *testing.B) {
-	short := strings.Repeat("abcd", 64/len("abcd"))
-	medium := strings.Repeat("abcd", 4096/len("abcd"))
-	long := strings.Repeat("abcd", 65536/len("abcd"))
+func Benchmark(b *testing.B) {
+	short := strings.Repeat("a!$\r", 64/4)
+	shortCompressed := Compress(short, []byte{})
+	medium := strings.Repeat("a!$\n", 4096/4)
+	mediumCompressed := Compress(medium, []byte{})
+	long := strings.Repeat("a!$\n", 65536/4)
+	longCompressed := Compress(long, []byte{})
 	out := make([]byte, 0, len(long))
 
-	b.Run(strconv.Itoa(len(short)), func(b *testing.B) {
+	b.Run("ok", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			_ = newPtrTree()
+		}
+	})
+
+	b.Run("compress 64", func(b *testing.B) {
 		b.SetBytes(int64(len(short)))
 		b.ResetTimer()
 
@@ -100,7 +72,16 @@ func BenchmarkCompressCommon(b *testing.B) {
 		}
 	})
 
-	b.Run(strconv.Itoa(len(medium)), func(b *testing.B) {
+	b.Run("decompress 64", func(b *testing.B) {
+		b.SetBytes(int64(len(short)))
+		b.ResetTimer()
+
+		for range b.N {
+			_, _ = Decompress(shortCompressed, out)
+		}
+	})
+
+	b.Run("compress 4096", func(b *testing.B) {
 		b.SetBytes(int64(len(medium)))
 		b.ResetTimer()
 
@@ -109,12 +90,30 @@ func BenchmarkCompressCommon(b *testing.B) {
 		}
 	})
 
-	b.Run(strconv.Itoa(len(long)), func(b *testing.B) {
+	b.Run("decompress 4096", func(b *testing.B) {
+		b.SetBytes(int64(len(medium)))
+		b.ResetTimer()
+
+		for range b.N {
+			_, _ = Decompress(mediumCompressed, out)
+		}
+	})
+
+	b.Run("compress 65536", func(b *testing.B) {
 		b.SetBytes(int64(len(long)))
 		b.ResetTimer()
 
 		for range b.N {
 			_ = Compress(long, out)
+		}
+	})
+
+	b.Run("decompress 65536", func(b *testing.B) {
+		b.SetBytes(int64(len(long)))
+		b.ResetTimer()
+
+		for range b.N {
+			_, _ = Decompress(longCompressed, out)
 		}
 	})
 }
