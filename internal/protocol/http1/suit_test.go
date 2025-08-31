@@ -68,7 +68,7 @@ func getInbuiltRouter() router.Router {
 func BenchmarkSuit(b *testing.B) {
 	b.Run("GET root 5 headers", func(b *testing.B) {
 		raw := generateRequest("", generateHeaders(5))
-		client := dummy.NewMockClient(raw)
+		client := dummy.NewMockClient(raw).LoopReads()
 		server, request := getSuit(client)
 		b.SetBytes(int64(len(raw)))
 		b.ReportAllocs()
@@ -82,7 +82,7 @@ func BenchmarkSuit(b *testing.B) {
 
 	b.Run("GET long path 5 headers", func(b *testing.B) {
 		data := generateRequest(longPath, generateHeaders(5))
-		client := dummy.NewMockClient(data)
+		client := dummy.NewMockClient(data).LoopReads()
 		server, request := getSuit(client)
 		b.SetBytes(int64(len(data)))
 		b.ReportAllocs()
@@ -97,7 +97,7 @@ func BenchmarkSuit(b *testing.B) {
 	b.Run("GET long path 10 headers", func(b *testing.B) {
 		raw := generateRequest(longPath, generateHeaders(10))
 		dispersed := scatter(raw, config.Default().NET.ReadBufferSize)
-		client := dummy.NewMockClient(dispersed...)
+		client := dummy.NewMockClient(dispersed...).LoopReads()
 		server, request := getSuit(client)
 		b.SetBytes(int64(len(raw)))
 		b.ReportAllocs()
@@ -114,7 +114,7 @@ func BenchmarkSuit(b *testing.B) {
 	b.Run("50 headers", func(b *testing.B) {
 		raw := generateRequest(longPath, generateHeaders(50))
 		dispersed := scatter(raw, config.Default().NET.ReadBufferSize)
-		client := dummy.NewMockClient(dispersed...)
+		client := dummy.NewMockClient(dispersed...).LoopReads()
 		server, request := getSuit(client)
 		b.SetBytes(int64(len(raw)))
 		b.ReportAllocs()
@@ -131,7 +131,7 @@ func BenchmarkSuit(b *testing.B) {
 	b.Run("heavily escaped", func(b *testing.B) {
 		raw := generateRequest(strings.Repeat("%20", 500), generateHeaders(10))
 		dispersed := scatter(raw, config.Default().NET.ReadBufferSize)
-		client := dummy.NewMockClient(dispersed...)
+		client := dummy.NewMockClient(dispersed...).LoopReads()
 		server, request := getSuit(client)
 		b.SetBytes(int64(len(raw)))
 		b.ReportAllocs()
@@ -147,7 +147,7 @@ func BenchmarkSuit(b *testing.B) {
 
 	b.Run("POST hello world", func(b *testing.B) {
 		raw := []byte("POST / HTTP/1.1\r\nContent-Length: 13\r\n\r\nHello, world!")
-		client := dummy.NewMockClient(scatter(raw, config.Default().NET.ReadBufferSize)...)
+		client := dummy.NewMockClient(scatter(raw, config.Default().NET.ReadBufferSize)...).LoopReads()
 		server, request := getSuit(client)
 		b.SetBytes(int64(len(raw)))
 		b.ReportAllocs()
