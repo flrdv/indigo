@@ -28,11 +28,19 @@ type App struct {
 }
 
 // New returns a new App instance.
-func New(addr string) *App {
-	return (&App{
+func New(addr ...string) *App {
+	app := &App{
 		cfg:        config.Default(),
 		supervisor: transport.NewSupervisor(),
-	}).Listen(addr, TCP())
+	}
+
+	tcp := TCP()
+
+	for _, a := range addr {
+		app.Listen(a, tcp)
+	}
+
+	return app
 }
 
 // Tune replaces default config.
