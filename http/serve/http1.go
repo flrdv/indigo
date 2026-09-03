@@ -9,6 +9,7 @@ import (
 	"github.com/indigo-web/indigo/internal/construct"
 	"github.com/indigo-web/indigo/internal/protocol/http1"
 	"github.com/indigo-web/indigo/router"
+	"github.com/indigo-web/indigo/transport"
 )
 
 // HTTP1 setups and serves an HTTP/1.1 server until it stops. Note that the connection isn't
@@ -20,7 +21,7 @@ func HTTP1(
 	r router.Router,
 	codecs codecutil.Cache,
 ) {
-	client := construct.Client(cfg.NET, conn)
+	client := transport.NewClient(conn, cfg.NET.ReadTimeout)
 	request := construct.Request(cfg, client)
 	request.Env.Encryption = enc
 	suit := http1.New(cfg, r, client, request, codecs)

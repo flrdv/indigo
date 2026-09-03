@@ -116,7 +116,7 @@ func (r *Response) Bytes(body []byte) *Response {
 	return r.Stream(r.body.Reset(body), int64(len(body)))
 }
 
-// Write implements io.Reader interface. It always returns n=len(b) and err=nil
+// Write implements io.Writer interface. It always returns n=len(b) and err=nil
 func (r *Response) Write(b []byte) (n int, err error) {
 	r.fields.Buffer = append(r.fields.Buffer, b...)
 	r.Bytes(r.fields.Buffer)
@@ -158,14 +158,14 @@ func (r *Response) File(path string) *Response {
 // using chunked transfer encoding. Otherwise, plain transfer is used, unless a compression is applied.
 // Specifying the size of -1 forces the stream to be considered unsized.
 func (r *Response) Stream(reader io.Reader, size ...int64) *Response {
-	type Len interface {
+	type Sized interface {
 		Len() int
 	}
 
 	r.fields.StreamSize = -1
 	if len(size) > 0 {
 		r.fields.StreamSize = size[0]
-	} else if l, ok := reader.(Len); ok {
+	} else if l, ok := reader.(Sized); ok {
 		r.fields.StreamSize = int64(l.Len())
 	}
 

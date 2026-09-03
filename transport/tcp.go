@@ -51,18 +51,23 @@ func (t *TCP) Bind(addr string) (err error) {
 
 func (t *TCP) Listen(cfg config.NET, cb func(conn net.Conn)) error {
 	for !t.stop.Load() {
-		err := t.l.SetDeadline(timer.Now().Add(cfg.AcceptLoopInterruptPeriod))
+		err := t.l.SetDeadline(timer.Now().Add(cfg.AcceptLoopInterrupt))
 		if err != nil {
 			return err
 		}
 
 		conn, err := t.l.Accept()
 		if err != nil {
-			if err.(*net.OpError).Err.Error() == os.ErrDeadlineExceeded.Error() {
-				continue
+			// listeners are periodically (~every 5 seconds) interrupted. Therefore, must be aware
+			// of the actual error type.
+			switch err.(type) {
+			case *net.OpError:
+				if err.(*net.OpError).Err.Error() == os.ErrDeadlineExceeded.Error() {
+					continue
+				}
+			default:
+				return err
 			}
-
-			return err
 		}
 
 		go func(conn net.Conn) {

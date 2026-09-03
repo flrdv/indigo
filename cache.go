@@ -9,7 +9,7 @@ import (
 // These 2 functions are proudly stolen from golang.org/x/crypto/acme/autocert/listener.go.
 // In some reason they are made private in some unknown reason, so I had to copy-paste this.
 
-func tlsCacheDir() string {
+func autocertCacheDir() string {
 	const base = "autocert-cache"
 	switch runtime.GOOS {
 	case "darwin":

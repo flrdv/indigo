@@ -43,7 +43,7 @@ func NewBody(src Fetcher) *Body {
 // The callback is not notified when there's no more data or networking error has
 // occurred.
 //
-// Please note: this method can be used only once.
+// Please note: this method only can be used once.
 func (b *Body) Callback(cb func([]byte) error) error {
 	if b.error != nil {
 		return b.error
@@ -70,7 +70,7 @@ func (b *Body) Callback(cb func([]byte) error) error {
 	}
 }
 
-// Bytes returns the whole body at once in a byte representation.
+// Bytes discards body streaming and returns whole request body contents.
 func (b *Body) Bytes() ([]byte, error) {
 	if len(b.buff) != 0 {
 		return b.buff, nil
@@ -108,12 +108,12 @@ func (b *Body) String() (string, error) {
 }
 
 // Read implements the io.Reader interface.
-func (b *Body) Read(into []byte) (n int, err error) {
+func (b *Body) Read(dst []byte) (n int, err error) {
 	if len(b.pending) == 0 && b.error == nil {
 		b.pending, b.error = b.Fetch()
 	}
 
-	n = copy(into, b.pending)
+	n = copy(dst, b.pending)
 	b.pending = b.pending[n:]
 
 	if len(b.pending) == 0 && b.error != nil {
@@ -126,8 +126,8 @@ func (b *Body) Read(into []byte) (n int, err error) {
 // JSON convoys the request's body to a json unmarshaller automatically and behaves
 // in a similar manner.
 //
-// Please note: this method cannot be used on requests with Content-Type incompatible
-// with mime.JSON (in this case, status.ErrUnsupportedMediaType is returned).
+// Please note: this method cannot be used on requests with Content-Type's those are
+// mime.JSON-incompatible (status.ErrUnsupportedMediaType is returned in that case).
 //
 // TODO: make possible to choose and use different from json-iterator json marshall/unmarshall
 func (b *Body) JSON(model any) error {

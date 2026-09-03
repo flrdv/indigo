@@ -29,6 +29,7 @@ type Transport struct {
 	spawnCallback func(cfg *config.Config, r router.Router, c []codec.Codec) func(net.Conn)
 }
 
+// TCP returns default tcp transport.
 func TCP() Transport {
 	return Transport{
 		inner: transport.NewTCP(),
@@ -42,6 +43,7 @@ func TCP() Transport {
 	}
 }
 
+// TLS returns default tls-over-tcp transport.
 func TLS(certs ...tls.Certificate) Transport {
 	if len(certs) == 0 {
 		panic("need at least one certificate")
@@ -50,12 +52,18 @@ func TLS(certs ...tls.Certificate) Transport {
 	return newTLSTransport(&tls.Config{Certificates: certs})
 }
 
+// TLSWithConfig returns default tls-over-tcp transport, but configured manually. Please note
+// that certificates must be manually passed via cfg.Certificates.
+func TLSWithConfig(cfg *tls.Config) Transport {
+	return newTLSTransport(cfg)
+}
+
 // Autocert tries to automatically issue a certificate for the given domains.
 // If operation succeeds, those will be (hopefully) saved into the default cache
 // directory, which depends on the OS. If you want to specify the cache directory,
 // use AutocertWithCache instead.
 func Autocert(domains ...string) Transport {
-	return AutocertWithCache(tlsCacheDir(), domains...)
+	return AutocertWithCache(autocertCacheDir(), domains...)
 }
 
 // AutocertWithCache tries to automatically issue a certificate for the given domains.
@@ -80,7 +88,7 @@ func AutocertWithCache(cache string, domains ...string) Transport {
 // browsers and tools (e.g. curl) may refuse to connect without adding security check skip
 // flags (in particular, -k or --insecure for curl.)
 func LocalCert(cache ...string) tls.Certificate {
-	dir := tlsCacheDir()
+	dir := autocertCacheDir()
 	if len(cache) > 0 {
 		dir = cache[0]
 	}

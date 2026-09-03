@@ -319,10 +319,10 @@ func compose(handler Handler, middlewares []Middleware) Handler {
 
 // getHandler looks up for a handler in the methodsMap. In case request method is HEAD, however
 // no matching handler is found, a handler for corresponding GET request will be retrieved
-func getHandler(reqMethod method.Method, mlut methodLUT) Handler {
-	handler := mlut[reqMethod]
-	if handler == nil && reqMethod == method.HEAD {
-		return getHandler(method.GET, mlut)
+func getHandler(m method.Method, mlut methodLUT) Handler {
+	handler := mlut[m]
+	if handler == nil && m == method.HEAD {
+		return mlut[method.GET]
 	}
 
 	return handler

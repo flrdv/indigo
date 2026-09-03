@@ -1,11 +1,11 @@
 package buffer
 
-// Buffer is a giant slice of data you write into it. Serves primarily the purpose of a quasi-arena
-// by hosting non-interrelated byte sequences in a single place. Allows writing byte sequences streamingly.
+// Buffer is a streaming arena, i.e. the actual allocation size isn't known in priori.
+// The allocated segments cannot (should not) be modified after committing.
 type Buffer struct {
-	memory  []byte
 	begin   int
 	maxSize int
+	memory  []byte
 }
 
 func New(initialSize, maxSize int) *Buffer {

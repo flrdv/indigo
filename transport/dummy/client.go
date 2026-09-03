@@ -7,8 +7,6 @@ import (
 	"github.com/indigo-web/indigo/transport"
 )
 
-var _ transport.Client = new(Client)
-
 // Client is a full-blown client implementation intended for mock tests, thereby providing relatively
 // reach functionality.
 type Client struct {

@@ -11,6 +11,10 @@ type Pair struct {
 	Key, Value string
 }
 
+func (p Pair) Empty() bool {
+	return len(p.Key) == 0 && len(p.Value) == 0
+}
+
 // Storage is an associative structure for storing (string, string) pairs. It acts as a map but
 // uses linear search instead, which proves to be more efficient on relatively low amount of
 // entries, which often enough is the case.
