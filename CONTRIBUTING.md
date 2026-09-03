@@ -1,18 +1,18 @@
 # Contributing
-Contributing to the project is always welcome. To make a contribution, first open an issue that'll be used for discussion.
+Contributing to the project is always welcome. Feel free to open pull-requests!
 
-# That kinds of contribution are welcome
-Any, if they don't break the following principles:
-- Code at least not that smelling
-- Code is formatted using `go fmt`
-- All tests are passing
-- If feature is error-prone, tests are bundled
-- Performance must not degrade that much
+But please, first make sure all tests are passing. Including those you've written to test your contribution.
+
+This project uses plain `go fmt`. If your golangci-lint suggests a modification of more than a half of the
+codebase, better consider disabling it (the modifications will regress later anyway.)
+
+Potential affection of performance must be accounted carefully, recalling the "blazingly fast" attribute of
+Indigo. Which is something I'd like to preserve.
 
 # How to make a pull-request
-After you've written some code, make sure all the commits have minimal-representative description and version is bumped respectively to semver.
+Make sure adding meaningful minimal-representative commit messages. Please.
 
-Note: pull-requests MUST be opened to origin `dev` branch ONLY. Otherwise it'll be declined
+Afterward, just click the "New PR" button on the right.
 
 # Code review
-Each pull-request is code-reviewed. Maintainers may leave comments about code sections that should be fixed (e.g. poor code-style, bad practices, etc.)
+I do.
