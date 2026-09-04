@@ -192,13 +192,14 @@ func TestFirstPhase(t *testing.T) {
 		s.NET.ReadTimeout = 1 * time.Second
 		require.NoError(t, app.
 			Tune(s).
+			Disable(proto.HTTP2).
 			OnStart(func() {
 				ch <- struct{}{}
 			}).
 			OnStop(func() {
 				ch <- struct{}{}
 			}).
-			Listen(altAddr, TCP()).
+			TCP(altAddr).
 			TLS(httpsAddr, LocalCert()).
 			Serve(r),
 		)

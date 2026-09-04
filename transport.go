@@ -12,57 +12,68 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/indigo-web/indigo/config"
 	"github.com/indigo-web/indigo/http/codec"
 	"github.com/indigo-web/indigo/http/serve"
 	"github.com/indigo-web/indigo/internal/codecutil"
+	"github.com/indigo-web/indigo/internal/protocol/http2"
 	"github.com/indigo-web/indigo/router"
 	"github.com/indigo-web/indigo/transport"
 	"golang.org/x/crypto/acme/autocert"
 )
 
-type Transport struct {
-	addr          string
-	inner         transport.Transport
-	spawnCallback func(cfg *config.Config, r router.Router, c []codec.Codec) func(net.Conn)
+type Transport uint8
+
+const (
+	TCP Transport = iota
+	TLS
+)
+
+type transportOrder struct {
+	addr      string
+	transport Transport
+	cfg       *tls.Config
 }
 
-// TCP returns default tcp transport.
-func TCP() Transport {
-	return Transport{
-		inner: transport.NewTCP(),
-		spawnCallback: func(cfg *config.Config, r router.Router, c []codec.Codec) func(net.Conn) {
-			acceptString := codecutil.AcceptEncoding(c)
+type transportCallback = func(*config.Config, router.Router, []codec.Codec) func(net.Conn)
 
-			return func(conn net.Conn) {
-				serve.HTTP1(cfg, conn, 0, r, codecutil.NewCache(c, acceptString))
-			}
-		},
+func tcpCallback(cfg *config.Config, r router.Router, c []codec.Codec) func(net.Conn) {
+	acceptString := codecutil.AcceptEncoding(c)
+
+	return func(conn net.Conn) {
+		client := transport.NewClient(conn, cfg.NET.ReadTimeout)
+		serve.HTTP1(cfg, client, 0, r, codecutil.NewCache(c, acceptString))
 	}
 }
 
-// TLS returns default tls-over-tcp transport.
-func TLS(certs ...tls.Certificate) Transport {
-	if len(certs) == 0 {
-		panic("need at least one certificate")
+func tlsCallback(cfg *config.Config, r router.Router, c []codec.Codec) func(net.Conn) {
+	acceptString := codecutil.AcceptEncoding(c)
+
+	return func(conn net.Conn) {
+		state := conn.(*tls.Conn).ConnectionState()
+		ver := state.Version
+		proto := state.NegotiatedProtocol
+		client := transport.NewClient(conn, cfg.NET.ReadTimeout)
+
+		switch proto {
+		case "", "http/1.1":
+			serve.HTTP1(cfg, client, ver, r, codecutil.NewCache(c, acceptString))
+		case "h2":
+			http2.NewHTTP2(cfg, client, ver, r).Serve()
+		default:
+			panic("BUG: unrecognized ALPN token: " + strconv.Quote(proto))
+		}
 	}
-
-	return newTLSTransport(&tls.Config{Certificates: certs})
-}
-
-// TLSWithConfig returns default tls-over-tcp transport, but configured manually. Please note
-// that certificates must be manually passed via cfg.Certificates.
-func TLSWithConfig(cfg *tls.Config) Transport {
-	return newTLSTransport(cfg)
 }
 
 // Autocert tries to automatically issue a certificate for the given domains.
 // If operation succeeds, those will be (hopefully) saved into the default cache
 // directory, which depends on the OS. If you want to specify the cache directory,
 // use AutocertWithCache instead.
-func Autocert(domains ...string) Transport {
+func Autocert(domains ...string) *tls.Config {
 	return AutocertWithCache(autocertCacheDir(), domains...)
 }
 
@@ -70,7 +81,7 @@ func Autocert(domains ...string) Transport {
 // If the operation succeeds, those will be (hopefully) saved into the provided cache
 // directory. It's recommended to use Autocert if there are no explicit needs to set
 // custom cache directory.
-func AutocertWithCache(cache string, domains ...string) Transport {
+func AutocertWithCache(cache string, domains ...string) *tls.Config {
 	m := &autocert.Manager{
 		Prompt: autocert.AcceptTOS,
 		Cache:  autocert.DirCache(cache),
@@ -80,7 +91,7 @@ func AutocertWithCache(cache string, domains ...string) Transport {
 		m.HostPolicy = autocert.HostWhitelist(domains...)
 	}
 
-	return newTLSTransport(&tls.Config{GetCertificate: m.GetCertificate})
+	return &tls.Config{GetCertificate: m.GetCertificate}
 }
 
 // LocalCert issues a self-signed certificate for local TLS-secured connections.
@@ -109,20 +120,6 @@ func Cert(cert, key string) tls.Certificate {
 	}
 
 	return c
-}
-
-func newTLSTransport(cfg *tls.Config) Transport {
-	return Transport{
-		inner: transport.NewTLS(cfg),
-		spawnCallback: func(cfg *config.Config, r router.Router, c []codec.Codec) func(net.Conn) {
-			acceptString := codecutil.AcceptEncoding(c)
-
-			return func(conn net.Conn) {
-				ver := conn.(*tls.Conn).ConnectionState().Version
-				serve.HTTP1(cfg, conn, ver, r, codecutil.NewCache(c, acceptString))
-			}
-		},
-	}
 }
 
 func generateSelfSignedCert(cache string) (cert, key string, err error) {

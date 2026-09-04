@@ -5,13 +5,14 @@ import (
 
 	"github.com/indigo-web/indigo/config"
 	"github.com/indigo-web/indigo/http/codec"
-	"github.com/indigo-web/indigo/internal/strutil"
+	"github.com/indigo-web/indigo/http/proto"
 	"github.com/indigo-web/indigo/router"
 	"github.com/indigo-web/indigo/router/inbuilt"
+	"github.com/indigo-web/indigo/router/inbuilt/uri"
 	"github.com/indigo-web/indigo/transport"
 )
 
-const Version = "0.17.3"
+const Version = "0.18.0"
 
 // App is just a struct with addr and shutdown channel that is currently
 // not used. Planning to replace it with context.WithCancel()
@@ -23,7 +24,7 @@ type App struct {
 		OnStop  func()
 	}
 	codecs     []codec.Codec
-	transports []Transport
+	orders     []transportOrder
 	supervisor transport.Supervisor
 }
 
@@ -34,10 +35,8 @@ func New(addr ...string) *App {
 		supervisor: transport.NewSupervisor(),
 	}
 
-	tcp := TCP()
-
 	for _, a := range addr {
-		app.Listen(a, tcp)
+		app.TCP(a)
 	}
 
 	return app
@@ -70,44 +69,46 @@ func (a *App) OnStop(cb func()) *App {
 	return a
 }
 
+// Disable allows the application to disable using specific HTTP versions.
+func (a *App) Disable(protocol proto.Protocol) *App {
+	a.cfg.NET.Protocols &^= protocol
+	return a
+}
+
 // Codec appends a new codec into the list of supported.
 func (a *App) Codec(codecs ...codec.Codec) *App {
 	a.codecs = append(a.codecs, codecs...)
 	return a
 }
 
-func (a *App) Listen(addr string, ts ...Transport) *App {
-	if len(addr) == 0 {
-		// empty addr is considered a no-op Bind operation. Main use-case is omitting
-		// default TCP binding when, for example, the default TCP listener is preferred
-		// to be disabled
-		return a
-	}
-
-	addr = strutil.NormalizeAddress(addr)
-
-	if len(ts) == 0 {
-		return a.Listen(addr, TCP())
-	}
-
-	for _, t := range ts {
-		t.addr = addr
-		a.transports = append(a.transports, t)
-	}
-
+// TCP tells the application to bind a plain TCP listener.
+func (a *App) TCP(addr string) *App {
+	a.orders = append(a.orders, transportOrder{
+		addr:      addr,
+		transport: TCP,
+	})
 	return a
 }
 
-// TLS is a shortcut for App.Listen(addr, indigo.TLS(indigo.Cert(cert, key))).
-//
-// Starts an TLS listener on the provided address using provided 1 or more certificates.
-// Zero passed certificates will panic.
-func (a *App) TLS(addr string, certs ...tls.Certificate) *App {
-	return a.Listen(addr, TLS(certs...))
+// TLS tells the application to bind a TLS listener.
+func (a *App) TLS(addr string, cert tls.Certificate, other ...tls.Certificate) *App {
+	certs := append([]tls.Certificate{cert}, other...)
+	return a.TLSWithConfig(addr, &tls.Config{Certificates: certs})
 }
 
-// Serve starts the web-application. If nil is passed instead of a router, empty inbuilt will
-// be used.
+// TLSWithConfig tells the application to bind a TLS listener with the provided config.
+func (a *App) TLSWithConfig(addr string, cfg *tls.Config) *App {
+	a.orders = append(a.orders, transportOrder{
+		addr:      addr,
+		transport: TLS,
+		cfg:       cfg,
+	})
+	return a
+}
+
+// Serve starts the application. If passed nil, default inbuilt.Router is used instead.
+//
+// TODO: add a greeting router.
 func (a *App) Serve(r router.Builder) error {
 	if r == nil {
 		r = inbuilt.New()
@@ -121,13 +122,35 @@ func (a *App) run(r router.Router) error {
 		a.hooks.OnStart()
 	}
 
-	for _, t := range a.transports {
-		if err := a.supervisor.Add(t.addr, t.inner, t.spawnCallback(a.cfg, r, a.codecs)); err != nil {
+	for _, order := range a.orders {
+		addr := uri.Normalize(order.addr)
+		if len(addr) == 0 {
+			continue
+		}
+
+		var (
+			cb transportCallback
+			tp transport.Transport
+		)
+
+		switch order.transport {
+		case TCP:
+			cb, tp = tcpCallback, transport.NewTCP()
+		case TLS:
+			cfg := order.cfg
+			cfg.NextProtos = alpnTokens(a.cfg.NET.Protocols)
+
+			cb, tp = tlsCallback, transport.NewTLS(cfg)
+		default:
+			panic("BUG: unrecognized transport order")
+		}
+
+		if err := a.supervisor.Bind(addr, tp, cb(a.cfg, r, a.codecs)); err != nil {
 			return err
 		}
 
 		if a.hooks.OnBind != nil {
-			a.hooks.OnBind(t.addr)
+			a.hooks.OnBind(addr)
 		}
 	}
 
@@ -142,4 +165,16 @@ func (a *App) run(r router.Router) error {
 // Stop stops the whole application immediately and waits until it _really_ stops.
 func (a *App) Stop() {
 	a.supervisor.Stop()
+}
+
+func alpnTokens(set proto.Protocol) []string {
+	protos := make([]string, 0, 2)
+	if set&proto.HTTP2 != 0 {
+		protos = append(protos, "h2")
+	}
+	if set&proto.HTTP11 != 0 {
+		protos = append(protos, "http/1.1")
+	}
+
+	return protos
 }

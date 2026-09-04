@@ -6,7 +6,7 @@ type Protocol uint8
 
 const (
 	Unknown Protocol = 0
-	HTTP10  Protocol = 1 << iota
+	HTTP10  Protocol = 1 << (iota - 1)
 	HTTP11
 	HTTP2
 

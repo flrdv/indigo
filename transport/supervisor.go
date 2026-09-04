@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 
 	"github.com/indigo-web/indigo/config"
+	"github.com/indigo-web/indigo/http/proto"
 )
 
 type Transport interface {
@@ -16,9 +17,10 @@ type Transport interface {
 }
 
 type Supervisor struct {
-	stopped *atomic.Bool
-	ts      []boundTransport
-	stopch  chan struct{}
+	protocols proto.Protocol
+	stopped   *atomic.Bool
+	ts        []boundTransport
+	stopch    chan struct{}
 }
 
 func NewSupervisor() Supervisor {
