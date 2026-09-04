@@ -60,14 +60,13 @@ func (t *TCP) Listen(cfg config.NET, cb func(conn net.Conn)) error {
 		if err != nil {
 			// listeners are periodically (~every 5 seconds) interrupted. Therefore, must be aware
 			// of the actual error type.
-			switch err.(type) {
-			case *net.OpError:
-				if err.(*net.OpError).Err.Error() == os.ErrDeadlineExceeded.Error() {
+			if e, ok := err.(*net.OpError); ok {
+				if e.Err.Error() == os.ErrDeadlineExceeded.Error() {
 					continue
 				}
-			default:
-				return err
 			}
+
+			return err
 		}
 
 		go func(conn net.Conn) {
