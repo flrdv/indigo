@@ -4,7 +4,13 @@ import (
 	"time"
 
 	"github.com/indigo-web/indigo/http/mime"
+	"github.com/indigo-web/indigo/http/proto"
 )
+
+/*
+Unfortunately, the config.Config type is widely used across the whole codebase, therefore
+it can't be contained directly in the project root.
+*/
 
 type (
 	HeadersNumber struct {
@@ -78,15 +84,16 @@ type (
 	}
 
 	NET struct {
-		// ReadBufferSize is a size of buffer in bytes which will be used to read from
-		// socket
-		ReadBufferSize int
 		// ReadTimeout controls the maximal lifetime of IDLE connections. If no data was
 		// received in this period of time, it'll be closed.
+		//
+		// Defaults to 90 seconds.
 		ReadTimeout time.Duration
-		// AcceptLoopInterruptPeriod controls how often will the Accept() call be interrupted
-		// in order to check whether it's time to stop. Defaults to 5 seconds.
-		AcceptLoopInterruptPeriod time.Duration
+		// AcceptLoopInterrupt controls how often will the Accept() call be interrupted
+		// in order to check whether it's time to stop.
+		//
+		// Defaults to 5 seconds.
+		AcceptLoopInterrupt time.Duration
 		// WriteBufferSize stores the HTTP response, which is going to be transmitted.
 		//
 		// The buffer growth rules are:
@@ -95,11 +102,44 @@ type (
 		//   `HTTP.ResponseBuffer.Maximal`
 		//  2) If a stream is unsized (1) and the previous write used more than ~98.44% of its
 		//   capacity (2), the capacity doubles.
+		//
+		// Defaults to minimum 2 KiB, maximum 64 KiB.
 		WriteBufferSize NETWriteBufferSize
 		// SmallBody limits how big must a response body be in order to be compressed, if the
 		// auto compression option is enabled. This setting doesn't affect enforced compression
 		// options and unsized streams.
+		//
+		// The file is considered compression-worthy starting at 4 KiB.
 		SmallBody int64
+		// Protocols defines the set of allowed HTTP versions to use.
+		//
+		// Defaults to proto.HTTP1 | proto.HTTP2
+		Protocols proto.Protocol
+	}
+
+	HTTP1 struct {
+		// ReadBuffer is a size of a buffer used to read incoming TCP data.
+		ReadBuffer int
+	}
+
+	HTTP2 struct {
+		// MaxConcurrentStreams defines the top limit of simultaneously active streams, thereby also
+		// limiting the (top) number goroutines per connection. The value is preferred to be a power
+		// of two.
+		//
+		// Defaults to 128.
+		MaxConcurrentStreams uint32
+		// WindowBuffer sets the maximal connection-level window size. It corresponds to the size
+		// of a buffer that will be allocated. It is allocated once and in full, abusing the
+		// demand-pages mechanism.
+		//
+		// Defaults to 1<<20 (1 MiB)
+		WindowBuffer uint32
+		// MailboxPrealloc preallocates the "pending reads" mailbox for each worker. Pending reads are
+		// reads those could not be immediately processed the moment they arrived.
+		//
+		// Defaults to 7.
+		MailboxPrealloc uint32
 	}
 )
 
@@ -112,6 +152,8 @@ type Config struct {
 	URI     URI
 	Headers Headers
 	Body    Body
+	HTTP1   HTTP1
+	HTTP2   HTTP2
 	NET     NET
 }
 
@@ -147,22 +189,29 @@ func Default() *Config {
 			MaxSize: 512 * 1024 * 1024, // 512 megabytes
 			Form: BodyForm{
 				EntriesPrealloc: 8,
-				// 1kb is intended for primarily x-www-form-urlencoded, as multipart
-				// needs of memory are assumingly fairly low
+				// 1kb is rather intended for x-www-form-urlencoded, as multipart runs on fairly low memory.
 				BufferPrealloc:     1024,
 				DefaultCoding:      mime.UTF8,
 				DefaultContentType: mime.Plain,
 			},
 		},
 		NET: NET{
-			ReadBufferSize:            2 * 1024, // 4kb is more than enough for ordinary requests.
-			ReadTimeout:               90 * time.Second,
-			AcceptLoopInterruptPeriod: 5 * time.Second,
+			ReadTimeout:         90 * time.Second,
+			AcceptLoopInterrupt: 5 * time.Second,
 			WriteBufferSize: NETWriteBufferSize{
 				Default: 2 * 1024,
 				Maximal: 64 * 1024,
 			},
 			SmallBody: 4 * 1024,
+			Protocols: proto.HTTP1 | proto.HTTP2,
+		},
+		HTTP1: HTTP1{
+			ReadBuffer: 2 * 1024, // 2kb sounds reasonable for ordinary requests.
+		},
+		HTTP2: HTTP2{
+			MaxConcurrentStreams: 128,
+			WindowBuffer:         1 << 20,
+			MailboxPrealloc:      7,
 		},
 	}
 }
