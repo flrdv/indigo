@@ -11,7 +11,7 @@ import (
 )
 
 func getRequest() *Request {
-	return NewRequest(config.Default(), nil, dummy.NewNopClient(), kv.New(), kv.New(), kv.New())
+	return NewRequest(config.Default(), nil, dummy.NewNop(), kv.New(), kv.New(), kv.New())
 }
 
 func TestRequest(t *testing.T) {

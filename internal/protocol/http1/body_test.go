@@ -2,6 +2,7 @@ package http1
 
 import (
 	"io"
+	"net"
 	"strconv"
 	"strings"
 	"testing"
@@ -16,15 +17,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func getBody(client transport.Client) *body {
-	return newBody(client, config.Default().Body)
+func getClient(conn net.Conn) *Client {
+	return NewClient(transport.NewClient(conn, 0), make([]byte, 1024))
 }
 
-func getRequestWithBody(chunked bool, body ...[]byte) (*http.Request, *body) {
+func getBody(client *Client, body config.Body) *Body {
+	return NewBody(client, body)
+}
+
+func getRequestWithBody(chunked bool, body ...[]byte) (*http.Request, *Body) {
 	cfg := config.Default()
-	client := dummy.NewMockClient(body...)
-	req := construct.Request(cfg, client)
-	b := getBody(client)
+	conn := dummy.New(body...)
+	req := construct.Request(cfg, conn)
+	b := getBody(getClient(conn), cfg.Body)
 	req.Body = http.NewBody(b)
 
 	var (
@@ -54,7 +59,7 @@ func getRequestWithBody(chunked bool, body ...[]byte) (*http.Request, *body) {
 	return req, b
 }
 
-func readall(b *body) ([]byte, error) {
+func readall(b *Body) ([]byte, error) {
 	var buff []byte
 
 	for {
@@ -113,10 +118,11 @@ func TestBody(t *testing.T) {
 			second = strings.Repeat("b", buffSize)
 		)
 
-		client := dummy.NewMockClient([]byte(first + second))
-		request := construct.Request(config.Default(), dummy.NewNopClient())
+		conn := dummy.New([]byte(first + second))
+		request := construct.Request(config.Default(), dummy.NewNop())
 		request.ContentLength = buffSize
-		b := getBody(client)
+		client := getClient(conn)
+		b := getBody(client, config.Default().Body)
 		b.Reset(request)
 
 		data, err := b.Fetch()
@@ -127,18 +133,16 @@ func TestBody(t *testing.T) {
 		require.Empty(t, data)
 		require.EqualError(t, err, io.EOF.Error())
 
-		data, err = client.Read()
-		require.NoError(t, err)
-		require.Equal(t, second, string(data))
+		require.Equal(t, second, string(client.pending))
 	})
 
 	t.Run("too big plain body", func(t *testing.T) {
 		data := strings.Repeat("a", 10)
 		request, _ := getRequestWithBody(false, []byte(data))
-		client := dummy.NewMockClient([]byte(data))
+		conn := dummy.New([]byte(data))
 		s := config.Default().Body
 		s.MaxSize = 9
-		b := newBody(client, s)
+		b := getBody(getClient(conn), s)
 		b.Reset(request)
 
 		_, err := readall(b)

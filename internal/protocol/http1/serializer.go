@@ -3,6 +3,7 @@ package http1
 import (
 	"io"
 	"math/bits"
+	"net"
 	"slices"
 	"strconv"
 	"strings"
@@ -21,14 +22,13 @@ import (
 	"github.com/indigo-web/indigo/internal/response"
 	"github.com/indigo-web/indigo/internal/strutil"
 	"github.com/indigo-web/indigo/kv"
-	"github.com/indigo-web/indigo/transport"
 )
 
 type serializer struct {
 	cfg            *config.Config
 	request        *http.Request
 	response       *response.Fields
-	client         transport.Client
+	conn           net.Conn
 	buff           []byte
 	streamReadBuff []byte
 	defaultHeaders defaultHeaders
@@ -38,14 +38,14 @@ type serializer struct {
 func newSerializer(
 	cfg *config.Config,
 	request *http.Request,
-	client transport.Client,
+	conn net.Conn,
 	codecs codecutil.Cache,
 	buff []byte,
 ) *serializer {
 	return &serializer{
 		cfg:     cfg,
 		request: request,
-		client:  client,
+		conn:    conn,
 		codecs:  codecs,
 		buff:    buff,
 		defaultHeaders: newDefaultHeaders(
@@ -152,7 +152,7 @@ func (s *serializer) writeStream(resp *response.Fields) (err error) {
 				return err
 			}
 
-			_, err = wt.WriteTo(s.client.Conn())
+			_, err = wt.WriteTo(s.conn)
 			return err
 		}
 
@@ -267,7 +267,7 @@ func (s *serializer) flush() error {
 		return nil
 	}
 
-	_, err := s.client.Write(s.buff)
+	_, err := s.conn.Write(s.buff)
 	s.buff = s.buff[:0]
 
 	return err

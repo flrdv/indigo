@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net"
 	"net/http/httputil"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/indigo-web/indigo/config"
 	"github.com/indigo-web/indigo/http"
@@ -68,8 +70,8 @@ func getInbuiltRouter() router.Router {
 func BenchmarkSuit(b *testing.B) {
 	b.Run("GET root 5 headers", func(b *testing.B) {
 		raw := generateRequest("", generateHeaders(5))
-		client := dummy.NewMockClient(raw).LoopReads()
-		server, request := getSuit(client)
+		client := dummy.New(raw).Loop().NoWrite()
+		server, request := getHTTP1(client)
 		b.SetBytes(int64(len(raw)))
 		b.ReportAllocs()
 		b.ResetTimer()
@@ -82,8 +84,8 @@ func BenchmarkSuit(b *testing.B) {
 
 	b.Run("GET long path 5 headers", func(b *testing.B) {
 		data := generateRequest(longPath, generateHeaders(5))
-		client := dummy.NewMockClient(data).LoopReads()
-		server, request := getSuit(client)
+		client := dummy.New(data).Loop().NoWrite()
+		server, request := getHTTP1(client)
 		b.SetBytes(int64(len(data)))
 		b.ReportAllocs()
 		b.ResetTimer()
@@ -96,9 +98,9 @@ func BenchmarkSuit(b *testing.B) {
 
 	b.Run("GET long path 10 headers", func(b *testing.B) {
 		raw := generateRequest(longPath, generateHeaders(10))
-		dispersed := scatter(raw, config.Default().NET.ReadBufferSize)
-		client := dummy.NewMockClient(dispersed...).LoopReads()
-		server, request := getSuit(client)
+		dispersed := scatter(raw, config.Default().HTTP1.ReadBuffer)
+		client := dummy.New(dispersed...).Loop().NoWrite()
+		server, request := getHTTP1(client)
 		b.SetBytes(int64(len(raw)))
 		b.ReportAllocs()
 		b.ResetTimer()
@@ -113,9 +115,9 @@ func BenchmarkSuit(b *testing.B) {
 
 	b.Run("50 headers", func(b *testing.B) {
 		raw := generateRequest(longPath, generateHeaders(50))
-		dispersed := scatter(raw, config.Default().NET.ReadBufferSize)
-		client := dummy.NewMockClient(dispersed...).LoopReads()
-		server, request := getSuit(client)
+		dispersed := scatter(raw, config.Default().HTTP1.ReadBuffer)
+		client := dummy.New(dispersed...).Loop().NoWrite()
+		server, request := getHTTP1(client)
 		b.SetBytes(int64(len(raw)))
 		b.ReportAllocs()
 		b.ResetTimer()
@@ -130,9 +132,9 @@ func BenchmarkSuit(b *testing.B) {
 
 	b.Run("heavily escaped", func(b *testing.B) {
 		raw := generateRequest(strings.Repeat("%20", 500), generateHeaders(10))
-		dispersed := scatter(raw, config.Default().NET.ReadBufferSize)
-		client := dummy.NewMockClient(dispersed...).LoopReads()
-		server, request := getSuit(client)
+		dispersed := scatter(raw, config.Default().HTTP1.ReadBuffer)
+		client := dummy.New(dispersed...).Loop().NoWrite()
+		server, request := getHTTP1(client)
 		b.SetBytes(int64(len(raw)))
 		b.ReportAllocs()
 		b.ResetTimer()
@@ -147,8 +149,8 @@ func BenchmarkSuit(b *testing.B) {
 
 	b.Run("POST hello world", func(b *testing.B) {
 		raw := []byte("POST / HTTP/1.1\r\nContent-Length: 13\r\n\r\nHello, world!")
-		client := dummy.NewMockClient(scatter(raw, config.Default().NET.ReadBufferSize)...).LoopReads()
-		server, request := getSuit(client)
+		client := dummy.New(scatter(raw, config.Default().HTTP1.ReadBuffer)...).Loop().NoWrite()
+		server, request := getHTTP1(client)
 		b.SetBytes(int64(len(raw)))
 		b.ReportAllocs()
 		b.ResetTimer()
@@ -160,14 +162,15 @@ func BenchmarkSuit(b *testing.B) {
 	})
 }
 
-func getSuit(client transport.Client, codecs ...codec.Codec) (*Suit, *http.Request) {
+func getHTTP1(conn net.Conn, codecs ...codec.Codec) (*HTTP1, *http.Request) {
 	cfg := config.Default()
 	r := getInbuiltRouter()
-	req := construct.Request(cfg, client)
-	suit := New(cfg, r, client, req, codecutil.NewCache(codecs, codecutil.AcceptEncoding(codecs)))
-	req.Body = http.NewBody(suit)
+	req := construct.Request(cfg, conn)
+	client := transport.NewClient(conn, 10*time.Second)
+	h1 := New(cfg, r, client, req, codecutil.NewCache(codecs, codecutil.AcceptEncoding(codecs)))
+	req.Body = http.NewBody(h1)
 
-	return suit, req
+	return h1, req
 }
 
 func scatter(data []byte, n int) (parts [][]byte) {
@@ -212,7 +215,7 @@ func encodeGZIP(text string) []byte {
 
 func TestSuit(t *testing.T) {
 	generateRequest := func(m method.Method, path string, headers http.Headers, body string) string {
-		request := construct.Request(config.Default(), dummy.NewNopClient())
+		request := construct.Request(config.Default(), dummy.NewNop())
 		request.Method = m
 		request.Path = path
 		request.Headers = headers.Add("Content-Length", strconv.Itoa(len(body)))
@@ -226,10 +229,10 @@ func TestSuit(t *testing.T) {
 	t.Run("echo", func(t *testing.T) {
 		const body = "Hello, world!"
 		data := generateRequest(method.POST, "/echo", kv.New(), body)
-		client := dummy.NewMockClient([]byte(data)).Journaling()
-		server, _ := getSuit(client)
+		conn := dummy.New([]byte(data))
+		server, _ := getHTTP1(conn)
 		require.True(t, server.ServeOnce())
-		resp, err := parseHTTP11Response("POST", client.Written())
+		resp, err := parseHTTP11Response("POST", conn.Written)
 		require.NoError(t, err)
 		require.Equal(t, 200, resp.StatusCode)
 		b, err := io.ReadAll(resp.Body)
@@ -244,11 +247,11 @@ func TestSuit(t *testing.T) {
 			Add("Transfer-Encoding", "chunked").
 			Add("Content-Encoding", "gzip")
 		request := generateRequest(method.POST, "/echo", headers, string(chunked))
-		client := dummy.NewMockClient([]byte(request)).Journaling()
-		server, _ := getSuit(client, codec.NewGZIP())
+		client := dummy.New([]byte(request))
+		server, _ := getHTTP1(client, codec.NewGZIP())
 
 		require.True(t, server.ServeOnce())
-		resp, err := parseHTTP11Response("POST", client.Written())
+		resp, err := parseHTTP11Response("POST", client.Written)
 		require.Equal(t, 200, resp.StatusCode)
 		require.Equal(t, []string{"gzip"}, resp.Header["Accept-Encoding"])
 		b, err := io.ReadAll(resp.Body)
@@ -264,8 +267,8 @@ func TestPOST(t *testing.T) {
 
 	t.Run("POST hello world", func(t *testing.T) {
 		raw := []byte("POST / HTTP/1.1\r\nContent-Length: 13\r\n\r\nHello, world!")
-		client := dummy.NewMockClient(scatter(raw, config.Default().NET.ReadBufferSize)...).LoopReads()
-		server, _ := getSuit(client)
+		client := dummy.New(scatter(raw, config.Default().HTTP1.ReadBuffer)...).Loop()
+		server, _ := getHTTP1(client)
 
 		for i := 0; i < N; i++ {
 			require.True(t, server.ServeOnce())
@@ -275,9 +278,9 @@ func TestPOST(t *testing.T) {
 	t.Run("discard POST 10mib", func(t *testing.T) {
 		body := strings.Repeat("a", 10_000_000)
 		raw := []byte("POST / HTTP/1.1\r\nContent-Length: 10000000\r\n\r\n" + body)
-		dispersed := scatter(raw, config.Default().NET.ReadBufferSize)
-		client := dummy.NewMockClient(dispersed...).LoopReads()
-		server, _ := getSuit(client)
+		dispersed := scatter(raw, config.Default().HTTP1.ReadBuffer)
+		client := dummy.New(dispersed...).Loop()
+		server, _ := getHTTP1(client)
 
 		for i := 0; i < N; i++ {
 			for j := 0; j < len(dispersed); j++ {
@@ -292,9 +295,9 @@ func TestPOST(t *testing.T) {
 		chunk := "fffe\r\n" + strings.Repeat("a", chunkSize) + "\r\n"
 		chunked := strings.Repeat(chunk, numberOfChunks) + "0\r\n\r\n"
 		raw := []byte("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n" + chunked)
-		dispersed := scatter(raw, config.Default().NET.ReadBufferSize)
-		client := dummy.NewMockClient(dispersed...).LoopReads()
-		server, _ := getSuit(client)
+		dispersed := scatter(raw, config.Default().HTTP1.ReadBuffer)
+		client := dummy.New(dispersed...).Loop()
+		server, _ := getHTTP1(client)
 
 		for i := 0; i < N; i++ {
 			for j := 0; j < len(dispersed); j++ {

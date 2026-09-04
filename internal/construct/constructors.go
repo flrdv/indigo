@@ -7,22 +7,15 @@ import (
 	"github.com/indigo-web/indigo/http"
 	"github.com/indigo-web/indigo/internal/buffer"
 	"github.com/indigo-web/indigo/kv"
-	"github.com/indigo-web/indigo/transport"
 )
 
-func Request(cfg *config.Config, client transport.Client) *http.Request {
-	headers := kv.NewPrealloc(int(cfg.Headers.Number.Default))
+func Request(cfg *config.Config, conn net.Conn) *http.Request {
+	headers := kv.NewPrealloc(cfg.Headers.Number.Default)
 	params := kv.NewPrealloc(cfg.URI.ParamsPrealloc)
 	vars := kv.New()
-	request := http.NewRequest(cfg, http.NewResponse(), client, headers, params, vars)
+	request := http.NewRequest(cfg, http.NewResponse(), conn, headers, params, vars)
 
 	return request
-}
-
-func Client(cfg config.NET, conn net.Conn) transport.Client {
-	readBuff := make([]byte, cfg.ReadBufferSize)
-
-	return transport.NewClient(conn, cfg.ReadTimeout, readBuff)
 }
 
 func Buffers(s *config.Config) (statusBuff, headersBuff *buffer.Buffer) {

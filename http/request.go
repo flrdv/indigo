@@ -10,7 +10,6 @@ import (
 	"github.com/indigo-web/indigo/http/proto"
 	"github.com/indigo-web/indigo/internal/strutil"
 	"github.com/indigo-web/indigo/kv"
-	"github.com/indigo-web/indigo/transport"
 )
 
 var zeroContext = context.Background()
@@ -49,7 +48,7 @@ type Request struct {
 	Env Environment
 	// Body is a dedicated entity providing access to the message body.
 	Body     *Body
-	client   transport.Client
+	conn     net.Conn
 	hijacked bool
 	response *Response
 	jar      cookie.Jar
@@ -59,7 +58,7 @@ type Request struct {
 func NewRequest(
 	cfg *config.Config,
 	response *Response,
-	client transport.Client,
+	conn net.Conn,
 	headers, params, vars *kv.Storage,
 ) *Request {
 	return &Request{
@@ -67,9 +66,9 @@ func NewRequest(
 		Params:   params,
 		Vars:     vars,
 		Headers:  headers,
-		Remote:   client.Remote(),
+		Remote:   conn.RemoteAddr(),
 		Ctx:      zeroContext,
-		client:   client,
+		conn:     conn,
 		response: response,
 		cfg:      cfg,
 	}
@@ -106,14 +105,14 @@ func (r *Request) Respond() *Response {
 
 // Hijack hijacks an underlying connection. The request body is implicitly discarded before
 // exposing the transport. After the handler function terminates, the connection is closed automatically.
-func (r *Request) Hijack() (transport.Client, error) {
+func (r *Request) Hijack() (net.Conn, error) {
 	if err := r.Body.Discard(); err != nil {
 		return nil, err
 	}
 
 	r.hijacked = true
 
-	return r.client, nil
+	return r.conn, nil
 }
 
 // Hijacked tells whether the connection was hijacked.

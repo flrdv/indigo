@@ -1,8 +1,6 @@
 package serve
 
 import (
-	"net"
-
 	"github.com/indigo-web/indigo/config"
 	"github.com/indigo-web/indigo/http"
 	"github.com/indigo-web/indigo/internal/codecutil"
@@ -16,15 +14,14 @@ import (
 // automatically closed on server stop
 func HTTP1(
 	cfg *config.Config,
-	conn net.Conn,
+	client transport.Client,
 	enc uint16,
 	r router.Router,
 	codecs codecutil.Cache,
 ) {
-	client := transport.NewClient(conn, cfg.NET.ReadTimeout)
-	request := construct.Request(cfg, client)
+	request := construct.Request(cfg, client.Conn)
 	request.Env.Encryption = enc
-	suit := http1.New(cfg, r, client, request, codecs)
-	request.Body = http.NewBody(suit)
-	suit.Serve()
+	h1 := http1.New(cfg, r, client, request, codecs)
+	request.Body = http.NewBody(h1)
+	h1.Serve()
 }

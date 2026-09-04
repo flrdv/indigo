@@ -26,7 +26,7 @@ func readbody(t *testing.T, r io.Reader) string {
 }
 
 func getRequest(m method.Method, path string) *http.Request {
-	request := construct.Request(config.Default(), dummy.NewNopClient())
+	request := construct.Request(config.Default(), dummy.NewNop())
 	request.Method = m
 	request.Path = path
 
@@ -560,7 +560,7 @@ func TestMutators(t *testing.T) {
 		}).
 		Build()
 
-	request := construct.Request(config.Default(), dummy.NewNopClient())
+	request := construct.Request(config.Default(), dummy.NewNop())
 	request.Method = method.GET
 	request.Path = "/"
 	resp := r.OnRequest(request)

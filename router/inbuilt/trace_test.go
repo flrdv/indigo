@@ -16,7 +16,7 @@ import (
 
 func TestTrace(t *testing.T) {
 	newRequest := func(path string, params http.Params) *http.Request {
-		req := construct.Request(config.Default(), dummy.NewNopClient())
+		req := construct.Request(config.Default(), dummy.NewNop())
 		req.Method = method.TRACE
 		req.Path = path
 		req.Params = params

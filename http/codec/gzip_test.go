@@ -11,7 +11,7 @@ import (
 )
 
 func compress(inst Instance, text string) []byte {
-	loopback := dummy.NewMockClient().Journaling()
+	loopback := dummy.New()
 	inst.ResetCompressor(loopback)
 
 	if _, err := inst.Write([]byte(text)); err != nil {
@@ -22,11 +22,11 @@ func compress(inst Instance, text string) []byte {
 		panic(err)
 	}
 
-	return loopback.Written()
+	return loopback.Written
 }
 
 func decompress(inst Instance, data ...[]byte) (string, error) {
-	if err := inst.ResetDecompressor(dummy.NewMockClient(data...), 512); err != nil {
+	if err := inst.ResetDecompressor(dummy.New(data...), 512); err != nil {
 		return "", err
 	}
 

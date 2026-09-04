@@ -7,19 +7,18 @@ import (
 	"github.com/indigo-web/indigo/config"
 	"github.com/indigo-web/indigo/http"
 	"github.com/indigo-web/indigo/http/status"
-	"github.com/indigo-web/indigo/transport"
 )
 
-type body struct {
+type Body struct {
 	maxLen        uint64
 	counter       uint64
-	reader        func(*body) ([]byte, error)
+	client        *Client
+	reader        func(*Body) ([]byte, error)
 	chunkedParser chunkedParser
-	client        transport.Client
 }
 
-func newBody(client transport.Client, s config.Body) *body {
-	return &body{
+func NewBody(client *Client, s config.Body) *Body {
+	return &Body{
 		reader:        nop,
 		client:        client,
 		maxLen:        s.MaxSize,
@@ -27,28 +26,28 @@ func newBody(client transport.Client, s config.Body) *body {
 	}
 }
 
-func (b *body) Fetch() ([]byte, error) {
+func (b *Body) Fetch() ([]byte, error) {
 	return b.reader(b)
 }
 
-func (b *body) Reset(request *http.Request) {
+func (b *Body) Reset(request *http.Request) {
 	if request.Chunked {
 		b.initChunked()
-		b.reader = (*body).readChunked
+		b.reader = (*Body).readChunked
 	} else if request.Connection == "close" {
 		b.initEOFReader()
-		b.reader = (*body).readTillEOF
+		b.reader = (*Body).readTillEOF
 	} else {
 		b.initPlain(uint64(request.ContentLength))
-		b.reader = (*body).readPlain
+		b.reader = (*Body).readPlain
 	}
 }
 
-func (b *body) initPlain(totalLen uint64) {
+func (b *Body) initPlain(totalLen uint64) {
 	b.counter = totalLen
 }
 
-func (b *body) readPlain() (body []byte, err error) {
+func (b *Body) readPlain() (body []byte, err error) {
 	if b.counter == 0 {
 		return nil, io.EOF
 	}
@@ -57,7 +56,7 @@ func (b *body) readPlain() (body []byte, err error) {
 		return nil, status.ErrBodyTooLarge
 	}
 
-	data, err := b.client.Read()
+	data, err := b.client.Fetch()
 	if err != nil {
 		return nil, err
 	}
@@ -75,12 +74,12 @@ func (b *body) readPlain() (body []byte, err error) {
 	return body, err
 }
 
-func (b *body) initEOFReader() {
+func (b *Body) initEOFReader() {
 	b.counter = 0
 }
 
-func (b *body) readTillEOF() ([]byte, error) {
-	chunk, err := b.client.Read()
+func (b *Body) readTillEOF() ([]byte, error) {
+	chunk, err := b.client.Fetch()
 	if b.counter > math.MaxUint64-uint64(len(chunk)) {
 		return nil, status.ErrBodyTooLarge
 	}
@@ -90,12 +89,12 @@ func (b *body) readTillEOF() ([]byte, error) {
 	return chunk, err
 }
 
-func (b *body) initChunked() {
+func (b *Body) initChunked() {
 	b.counter = 0
 }
 
-func (b *body) readChunked() (body []byte, err error) {
-	data, err := b.client.Read()
+func (b *Body) readChunked() (body []byte, err error) {
+	data, err := b.client.Fetch()
 	if err != nil {
 		return nil, err
 	}
@@ -117,6 +116,6 @@ func (b *body) readChunked() (body []byte, err error) {
 	return chunk, err
 }
 
-func nop(*body) ([]byte, error) {
+func nop(*Body) ([]byte, error) {
 	return nil, io.EOF
 }

@@ -13,7 +13,7 @@ import (
 )
 
 func newRequest(hosts ...string) *http.Request {
-	request := construct.Request(config.Default(), dummy.NewNopClient())
+	request := construct.Request(config.Default(), dummy.NewNop())
 	for _, host := range hosts {
 		request.Headers.Add("Host", host)
 	}

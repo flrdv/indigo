@@ -21,7 +21,7 @@ import (
 )
 
 func getParser(cfg *config.Config) (*Parser, *http.Request) {
-	request := construct.Request(cfg, dummy.NewNopClient())
+	request := construct.Request(cfg, dummy.NewNop())
 	statusLine, headers := construct.Buffers(cfg)
 	p := NewParser(cfg, request, statusLine, headers)
 

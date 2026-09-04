@@ -18,7 +18,7 @@ func TestBody(t *testing.T) {
 			chunks[i] = []byte(chunk)
 		}
 
-		return NewBody(dummy.NewMockClient(chunks...))
+		return NewBody(dummy.New(chunks...))
 	}
 
 	t.Run("Callback", func(t *testing.T) {
@@ -167,7 +167,7 @@ func TestBody(t *testing.T) {
 	})
 
 	t.Run("reader", func(t *testing.T) {
-		data := dummy.NewMockClient([]byte("Hello, world!"))
+		data := dummy.New([]byte("Hello, world!"))
 		request := &Request{cfg: config.Default()}
 		b := NewBody(data)
 		b.Reset(request)
