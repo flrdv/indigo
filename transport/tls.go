@@ -21,7 +21,10 @@ func (t *TLS) Bind(addr string) error {
 	}
 
 	l := tls.NewListener(tcp, t.cfg)
-	t.TCP = newTCP(tlsAdapter{tcp, l})
+	t.TCP = newTCP(tlsAdapter{
+		TCPListener: tcp,
+		tls:         l,
+	})
 
 	return nil
 }
@@ -32,5 +35,18 @@ type tlsAdapter struct {
 }
 
 func (t tlsAdapter) Accept() (net.Conn, error) {
-	return t.tls.Accept()
+	for {
+		conn, err := t.tls.Accept()
+		if err != nil {
+			return nil, err
+		}
+
+		if err = conn.(*tls.Conn).Handshake(); err != nil {
+			_ = conn.Close()
+			continue
+		}
+
+		return conn, nil
+	}
+
 }
