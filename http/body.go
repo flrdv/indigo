@@ -14,7 +14,7 @@ import (
 )
 
 // Fetcher abstracts the underlying protocol-dependant body source. Even though the signature
-// is identical to transport.Client.Read(), it is named differently in order to highlight the
+// is identical to transport.Client.Fetch(), it is named differently in order to highlight the
 // difference between relatively low-level connection "raw data" and high-level body
 // data streams.
 type Fetcher interface {

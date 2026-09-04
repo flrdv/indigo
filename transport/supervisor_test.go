@@ -82,7 +82,7 @@ func TestSupervisor(t *testing.T) {
 	newSupervisor := func(ts ...*transportMock) (*Supervisor, error) {
 		sup := NewSupervisor()
 		for _, transport := range ts {
-			if err := sup.Add("", transport, nil); err != nil {
+			if err := sup.Bind("", transport, nil); err != nil {
 				return nil, err
 			}
 		}

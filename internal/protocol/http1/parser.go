@@ -63,7 +63,7 @@ func NewParser(cfg *config.Config, request *http.Request, statusBuff, headers *b
 	}
 }
 
-func (p *Parser) Parse(data []byte) (done bool, extra []byte, err error) {
+func (p *Parser) Parse(data []byte) (done bool, body []byte, err error) {
 	_ = *p.request
 	request := p.request
 	requestLine := p.requestLine

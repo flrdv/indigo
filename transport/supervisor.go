@@ -28,7 +28,7 @@ func NewSupervisor() Supervisor {
 	}
 }
 
-func (s *Supervisor) Add(addr string, transport Transport, cb func(net.Conn)) error {
+func (s *Supervisor) Bind(addr string, transport Transport, cb func(net.Conn)) error {
 	err := transport.Bind(addr)
 	if err != nil {
 		s.close()
