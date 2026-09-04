@@ -81,11 +81,9 @@ func (s *Supervisor) Stop() {
 }
 
 func (s *Supervisor) stop() {
-	if s.stopped.Load() {
+	if s.stopped.Swap(true) {
 		return
 	}
-
-	s.stopped.Store(true)
 
 	for _, t := range s.ts {
 		t.t.Stop()
