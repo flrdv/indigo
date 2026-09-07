@@ -2,39 +2,36 @@ package http2
 
 import (
 	"encoding/binary"
-	"fmt"
 	"io"
 	"math"
 	"net"
-	"strconv"
 	"sync/atomic"
-
-	"github.com/indigo-web/indigo/internal/protocol/http2/hpack"
 )
 
 type Serializer struct {
-	mu mutex
-
-	etable hpack.Table
+	window atomic.Uint32
+	mu     mutex
 	conn   net.Conn
 }
 
-func NewSerializer(conn net.Conn, etable hpack.Table) Serializer {
+func NewSerializer(conn net.Conn) Serializer {
 	return Serializer{
-		mu:     newMutex(),
-		etable: etable,
-		conn:   conn,
+		mu:   newMutex(),
+		conn: conn,
 	}
 }
 
-func (s *Serializer) Write(frame Frame, payload []byte) error {
-	fmt.Println("writing:", frame, strconv.Quote(string(payload)))
+func (s *Serializer) Write(typ FrameType, flags uint8, stream uint32, payload []byte) error {
+	headers := Frame{
+		Type:   typ,
+		Flags:  flags,
+		Length: uint32(len(payload)),
+		Stream: stream,
+	}.ToBytes()
 
-	frame.Length = uint32(len(payload))
-	buff := make([]byte, FrameOctets+len(payload))
-	headers := frame.Serialize()
+	buff := make([]byte, len(headers)+len(payload))
 	copy(buff, headers[:])
-	copy(buff[FrameOctets:], payload)
+	copy(buff[len(headers):], payload)
 
 	s.mu.Acquire()
 	defer s.mu.Release()
@@ -42,36 +39,24 @@ func (s *Serializer) Write(frame Frame, payload []byte) error {
 	return err
 }
 
-func (s *Serializer) WriteStream(frame Frame, stream io.Reader) error {
+func (s *Serializer) WriteStream(stream uint32, r io.Reader) error {
 	type Sized interface {
 		Len() int
 	}
 
-	payload, err := io.ReadAll(stream)
+	payload, err := io.ReadAll(r)
 	if err != nil {
 		return err
 	}
 
-	return s.Write(frame, payload)
+	return s.Write(DATA, FENDSTREAM, stream, payload)
 }
 
 func (s *Serializer) WriteError(stream uint32, err *Error) error {
-	data := Frame{
-		Type:   RSTSTREAM,
-		Flags:  0,
-		Length: 4,
-		Stream: stream,
-	}.Serialize()
+	var payload [4]byte
+	binary.BigEndian.PutUint32(payload[:0], err.Code)
 
-	buff := make([]byte, FrameOctets+4)
-	copy(buff, data[:])
-	buff = binary.BigEndian.AppendUint32(buff[:FrameOctets], err.Code)
-
-	s.mu.Acquire()
-	defer s.mu.Release()
-	_, e := s.conn.Write(buff)
-
-	return e
+	return s.Write(RSTSTREAM, 0, stream, payload[:])
 }
 
 /*

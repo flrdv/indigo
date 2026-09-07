@@ -10,8 +10,8 @@ import (
 )
 
 type Body struct {
-	maxLen        uint64
-	counter       uint64
+	maxLen        uint32
+	counter       uint32
 	client        *Client
 	reader        func(*Body) ([]byte, error)
 	chunkedParser chunkedParser
@@ -38,12 +38,12 @@ func (b *Body) Reset(request *http.Request) {
 		b.initEOFReader()
 		b.reader = (*Body).readTillEOF
 	} else {
-		b.initPlain(uint64(request.ContentLength))
+		b.initPlain(uint32(request.ContentLength))
 		b.reader = (*Body).readPlain
 	}
 }
 
-func (b *Body) initPlain(totalLen uint64) {
+func (b *Body) initPlain(totalLen uint32) {
 	b.counter = totalLen
 }
 
@@ -61,13 +61,13 @@ func (b *Body) readPlain() (body []byte, err error) {
 		return nil, err
 	}
 
-	if uint64(len(data)) >= b.counter {
+	if uint32(len(data)) >= b.counter {
 		body, data = data[:b.counter], data[b.counter:]
 		b.client.Pushback(data)
 		b.counter = 0
 		err = io.EOF
 	} else {
-		b.counter -= uint64(len(data))
+		b.counter -= uint32(len(data))
 		body = data
 	}
 
@@ -80,11 +80,11 @@ func (b *Body) initEOFReader() {
 
 func (b *Body) readTillEOF() ([]byte, error) {
 	chunk, err := b.client.Fetch()
-	if b.counter > math.MaxUint64-uint64(len(chunk)) {
+	if b.counter > math.MaxUint32-uint32(len(chunk)) {
 		return nil, status.ErrBodyTooLarge
 	}
 
-	b.counter += uint64(len(chunk))
+	b.counter += uint32(len(chunk))
 
 	return chunk, err
 }
@@ -106,11 +106,11 @@ func (b *Body) readChunked() (body []byte, err error) {
 		return nil, err
 	}
 
-	if b.counter > math.MaxUint64-uint64(len(chunk)) {
+	if b.counter > math.MaxUint32-uint32(len(chunk)) {
 		return nil, status.ErrBodyTooLarge
 	}
 
-	b.counter += uint64(len(chunk))
+	b.counter += uint32(len(chunk))
 	b.client.Pushback(extra)
 
 	return chunk, err

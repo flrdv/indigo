@@ -80,6 +80,7 @@ func (h *HTTP1) serve(once bool) (ok bool) {
 			return false
 		}
 
+		// todo check whether we've got an HTTP/2 preface.
 		done, bodydata, err := h.Parse(data)
 		if err != nil {
 			resp := respond(request, h.router.OnError(request, err))
@@ -178,8 +179,8 @@ func isKeepAlive(protocol proto.Protocol, req *http.Request) bool {
 		// in case of HTTP/1.1, keep-alive may be only disabled
 		return !strutil.CmpFoldSafe(req.Connection, "close")
 	default:
-		// as the protocol is unknown and the code was probably caused by some sort
-		// of bug, consider closing it
+		// we are responsible for HTTP/1 only. All others are most probably a consequence
+		// of some kind of bug.
 		return false
 	}
 }
