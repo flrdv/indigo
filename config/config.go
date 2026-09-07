@@ -77,7 +77,7 @@ type (
 		// MaxSize describes the maximal size of a body, that can be processed. 0 will discard
 		// any request with body (each call to request's body will result in status.ErrBodyTooLarge).
 		// In order to disable the setting, use the math.MaxUInt64 value.
-		MaxSize uint64
+		MaxSize uint32
 		// Form is either application/x-www-form-urlencoded or multipart/form-data. Due to their common
 		// nature, they are easy to be generalized.
 		Form BodyForm
@@ -123,6 +123,11 @@ type (
 	}
 
 	HTTP2 struct {
+		// MailboxPrealloc preallocates the "pending reads" mailbox for each worker. Pending reads are
+		// reads those could not be immediately processed the moment they arrived.
+		//
+		// Defaults to 7.
+		MailboxPrealloc uint32
 		// MaxConcurrentStreams defines the top limit of simultaneously active streams, thereby also
 		// limiting the (top) number goroutines per connection. The value is preferred to be a power
 		// of two.
@@ -130,16 +135,38 @@ type (
 		// Defaults to 128.
 		MaxConcurrentStreams uint32
 		// WindowBuffer sets the maximal connection-level window size. It corresponds to the size
-		// of a buffer that will be allocated. It is allocated once and in full, abusing the
-		// demand-pages mechanism.
+		// of a buffer that will be allocated and corresponds the SETTINGS_INITIAL_WINDOW_SIZE value.
+		//
+		// The buffer is allocated once and in full, abusing the demand-pages mechanism.
 		//
 		// Defaults to 1<<20 (1 MiB)
 		WindowBuffer uint32
-		// MailboxPrealloc preallocates the "pending reads" mailbox for each worker. Pending reads are
-		// reads those could not be immediately processed the moment they arrived.
+		// HeaderTableSize
 		//
-		// Defaults to 7.
-		MailboxPrealloc uint32
+		// This setting allows the sender to inform the remote endpoint of the maximum size of the
+		// compression table used to decode field blocks, in units of octets. The encoder can select
+		// any size equal to or less than this value by using signaling specific to the compression
+		// format inside a field block (see [COMPRESSION]).
+		//
+		// The initial value is 4,096 octets.
+		HeaderTableSize uint32
+		// MaxFrameSize
+		//
+		// This setting indicates the size of the largest frame payload that the sender is willing
+		// to receive, in units of octets.
+		//
+		// The initial value is 2^14 (16,384) octets. The value advertised by an endpoint MUST be
+		// between this initial value and the maximum allowed frame size (2^24-1 or 16,777,215 octets),
+		// inclusive.
+		MaxFrameSize uint32
+		// MaxHeaderListSize
+		//
+		// This setting indicates the size of the largest frame payload that the sender is willing to
+		// receive, in units of octets.
+		//
+		// The initial value is 2^14 (16,384) octets. The value advertised by an endpoint MUST be between
+		// this initial value and the maximum allowed frame size (2^24-1 or 16,777,215 octets), inclusive.
+		MaxHeaderListSize uint32
 	}
 )
 
@@ -157,8 +184,7 @@ type Config struct {
 	NET     NET
 }
 
-// Default returns default config. Those are initially well-balanced, however maximal defaults
-// are pretty permitting.
+// Default returns default config. Standard values are memory-saving and maximal ones are quire permissive.
 func Default() *Config {
 	return &Config{
 		URI: URI{
@@ -180,8 +206,8 @@ func Default() *Config {
 				Default: 1 * 1024,  // 1kb for headers must be fairly enough in most cases.
 				Maximal: 16 * 1024, // However, there also might be extremely long cookies.
 			},
-			MaxEncodingTokens:       4,  // 1 for chunked, leaving at most 3 compressors to be composed
-			MaxAcceptEncodingTokens: 20, // that must be a way too advanced client
+			MaxEncodingTokens:       4,  // 1 for chunked, leaving at most 3 compressors to be composed.
+			MaxAcceptEncodingTokens: 20, // that must be quite an advanced client.
 			Default:                 make(map[string]string),
 			CookiesPrealloc:         5,
 		},
@@ -209,9 +235,12 @@ func Default() *Config {
 			ReadBuffer: 2 * 1024, // 2kb sounds reasonable for ordinary requests.
 		},
 		HTTP2: HTTP2{
+			MailboxPrealloc:      7,
 			MaxConcurrentStreams: 128,
 			WindowBuffer:         1 << 20,
-			MailboxPrealloc:      7,
+			HeaderTableSize:      4096,
+			MaxFrameSize:         1 << 14,
+			MaxHeaderListSize:    1 << 14,
 		},
 	}
 }
