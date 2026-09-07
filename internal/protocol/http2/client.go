@@ -1,7 +1,6 @@
 package http2
 
 import (
-	"errors"
 	"io"
 	"math"
 	"sync"
@@ -10,15 +9,11 @@ import (
 	"github.com/indigo-web/indigo/transport"
 )
 
-// ErrLimit notifies the caller that the read limit is reached. Hopefully he'll stop and desist.
-var ErrLimit = errors.New("read limit reached")
-
 // h2client implements higher-level features for HTTP2.
 type h2client struct {
 	transport.Client
 	allocator
 
-	limit     int
 	preserved []byte
 	src       readsource
 }
@@ -26,7 +21,6 @@ type h2client struct {
 func newH2Client(underlying transport.Client, bufferSize uint32) h2client {
 	return h2client{
 		Client:    underlying,
-		limit:     -1,
 		allocator: newAllocator(bufferSize),
 		src:       readsource{Exhausted: true},
 	}
@@ -40,12 +34,6 @@ func (h *h2client) AddSource(mb [][]byte, c chan []byte) {
 	}
 }
 
-// Limit will notify the caller after he reads `limit` bytes. The very next call after reaching
-// the limit yields ErrLimit.
-func (h *h2client) Limit(limit int) {
-	h.limit = limit
-}
-
 func (h *h2client) ReadAtMost(n uint32) ([]byte, error) {
 	data, err := h.Read()
 
@@ -57,26 +45,13 @@ func (h *h2client) ReadAtMost(n uint32) ([]byte, error) {
 }
 
 func (h *h2client) Read() (data []byte, err error) {
-	if h.limit == 0 {
-		h.limit = -1
-		return nil, ErrLimit
-	}
-
 	data, h.preserved = h.preserved, nil
 	if len(data) == 0 {
 		data, err = h.moreData()
 	}
 
-	if h.limit == -1 {
-		return data, err
-	}
-
-	n := min(h.limit, len(data))
-	data = data[:n]
-	h.Pushback(data[n:])
-	h.limit -= n
-
-	return data, nil
+	//fmt.Println("read:", strconv.Quote(string(data)))
+	return data, err
 }
 
 func (h *h2client) moreData() (data []byte, err error) {
@@ -97,10 +72,6 @@ func (h *h2client) moreData() (data []byte, err error) {
 }
 
 func (h *h2client) Pushback(data []byte) {
-	if h.limit != -1 {
-		h.limit += len(data)
-	}
-
 	h.preserved = data
 }
 
@@ -137,18 +108,46 @@ func (h *h2client) ReadFull(dst []byte) (err error) {
 		dst = dst[n:]
 		h.Pushback(data[n:])
 
-		switch err {
-		case nil:
-		case ErrLimit:
-			// we definitely shouldn't have been limited here.
-			// todo improve errors. This should be ErrUnexpectedLimit and start screaming all around "INTERNAL BUUUUG"
-			return io.ErrUnexpectedEOF
-		default:
+		if err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+type limitedClient struct {
+	limit  int
+	client *h2client
+}
+
+func newLimitedClient(client *h2client, limit int) limitedClient {
+	return limitedClient{
+		limit:  limit,
+		client: client,
+	}
+}
+
+func (l *limitedClient) Remains() int {
+	return l.limit
+}
+
+func (l *limitedClient) ReadByte() (byte, error) {
+	if l.limit <= 0 {
+		return 0, io.ErrUnexpectedEOF
+	}
+
+	l.limit--
+	return l.client.ReadByte()
+}
+
+func (l *limitedClient) ReadFull(dst []byte) error {
+	l.limit -= len(dst)
+	if l.limit < 0 {
+		return io.ErrUnexpectedEOF
+	}
+
+	return l.client.ReadFull(dst)
 }
 
 type readsource struct {
