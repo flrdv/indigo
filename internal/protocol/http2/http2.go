@@ -6,6 +6,7 @@ import (
 	"math"
 	"strconv"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/flrdv/uf"
 	"github.com/indigo-web/indigo/config"
@@ -13,8 +14,6 @@ import (
 	"github.com/indigo-web/indigo/http/method"
 	"github.com/indigo-web/indigo/http/proto"
 	"github.com/indigo-web/indigo/internal/construct"
-	"github.com/indigo-web/indigo/internal/protocol/http2/hpack"
-	"github.com/indigo-web/indigo/kv"
 	"github.com/indigo-web/indigo/router"
 	"github.com/indigo-web/indigo/transport"
 )
@@ -31,10 +30,10 @@ type HTTP2 struct {
 	cfg        *config.Config
 	client     h2client
 	workers    hmap
-	dtable     hpack.Table
+	dtable     Table
 	router     router.Router
-	settings   Settings
 	serializer Serializer
+	settings   Settings
 }
 
 func NewHTTP2(
@@ -43,7 +42,7 @@ func NewHTTP2(
 	tlsVersion uint16,
 	r router.Router,
 ) *HTTP2 {
-	dtable, etable := hpack.NewPair(defaultSettings[SHEADERTABLESIZE])
+	dtable, etable := NewPair()
 
 	return &HTTP2{
 		tlsVersion: tlsVersion,
@@ -51,16 +50,15 @@ func NewHTTP2(
 		cfg:        cfg,
 		client:     newH2Client(client, cfg.HTTP2.WindowBuffer),
 		workers:    newMap(cfg.HTTP2.MaxConcurrentStreams),
-		dtable:     dtable,
+		dtable:     NewTable(cfg.HTTP2.HeaderTableSize),
 		router:     r,
-		settings:   defaultSettings,
 		serializer: NewSerializer(client, etable),
+		settings:   defaultSettings,
 	}
 }
 
 func (h *HTTP2) Serve() {
-	if err := h.Prelude(); err != nil {
-		// todo what to do kurwa
+	if !h.Prelude() {
 		return
 	}
 
@@ -72,6 +70,7 @@ func (h *HTTP2) Delegate() *Error {
 	// todo can I really just pass data like that? Considering bumping, tails, etc.
 
 	if h.freeworkers.Load() > 0 {
+		fmt.Println("delegated (to free one)")
 		h.freeworkers.Add(math.MaxUint32)
 		h.queue <- struct{}{}
 		return nil
@@ -83,6 +82,7 @@ func (h *HTTP2) Delegate() *Error {
 
 	h.allworkers++
 	go h.work()
+	fmt.Println("delegated (to new worker)")
 	return nil
 }
 
@@ -93,39 +93,42 @@ func (h *HTTP2) ReacquireConn() {
 
 func (h *HTTP2) work() {
 	me := newWorker(0, h)
-	_, err := h.Process(me)
-	_ = h.serializer.Write(Frame{Type: GOAWAY}, uf.S2B(err.Error()))
+	fmt.Println("working", unsafe.Pointer(me))
+	frame, err := h.Process(me)
+	fmt.Println("failed on frame", frame, unsafe.Pointer(me))
+	_ = h.serializer.Write(GOAWAY, 0, frame.Stream, uf.S2B(err.Error()))
 }
 
-func (h *HTTP2) Prelude() error {
-	if err := h.readPreface(); err != nil {
-		// todo do we need to notify the router at all?
-		return err
+func (h *HTTP2) Prelude() bool {
+	if h.readPreface() != nil {
+		return false
 	}
 
 	frame, err := h.readFrame()
 	if err != nil {
-		//s.router.OnError(s.request, status.ErrCloseConnection)
-		return err
+		return false
 	}
 
 	if frame.Type != SETTINGS {
-		//s.router.OnError(s.request, status.ErrBadRequest)
-		return err
+		return false
 	}
 
-	if err = h.readSettings(frame); err != nil {
-		// todo notify router about the error
-		return err
+	if h.readSettings(frame) != nil {
+		return false
 	}
 
-	settings := Frame{
-		Type:   SETTINGS,
-		Flags:  0,
-		Length: 0,
-		Stream: 0,
+	mySettings := SettingsFrom(h.cfg.HTTP2).ToBytes()
+	if err = h.serializer.Write(SETTINGS, 0, 0, mySettings[:]); err != nil {
+		return false
 	}
-	return h.serializer.Write(settings, nil)
+
+	h.dtable = NewTable(h.settings[SHEADERTABLESIZE])
+
+	if h.serializer.Write(SETTINGS, FACK, 0, nil) != nil {
+		return false
+	}
+
+	return true
 }
 
 // Process is the real hero. It receives all the incoming frames and handles them.
@@ -147,7 +150,7 @@ func (h *HTTP2) Process(me *worker) (Frame, error) {
 			return frame, err
 		}
 
-		if frame.Length > h.settings[SMAXFRAMESIZE] {
+		if frame.Length > h.cfg.HTTP2.MaxFrameSize {
 			if !frame.AltersState() {
 				if err = h.client.Skip(frame.Length); err != nil {
 					return frame, err
@@ -208,6 +211,10 @@ func (h *HTTP2) Process(me *worker) (Frame, error) {
 
 			h.lastID = frame.Stream
 			me.ID = frame.Stream
+			if frame.Is(FENDSTREAM) {
+				me.State.Set(wstateNoData)
+			}
+
 			h.workers.Assign(me)
 
 			if err := h.Delegate(); err != nil {
@@ -224,50 +231,32 @@ func (h *HTTP2) Process(me *worker) (Frame, error) {
 
 			request.Body = http.NewBody(me)
 			response := h.router.OnRequest(request)
+
+			if err = request.Body.Discard(); err != nil {
+				return Frame{}, err
+			}
+
 			h.workers.Delete(me.ID)
 			me.ID = 0
 
-			_ = response // todo send the response lol
-
-			headers := Frame{
-				Type:   HEADERS,
-				Flags:  FENDHEADERS,
-				Stream: frame.Stream,
-			}
-			data := Frame{
-				Type:   DATA,
-				Flags:  FENDSTREAM,
-				Stream: frame.Stream,
-			}
-
+			flags := FENDHEADERS
 			datastream := response.Expose().Stream
 			if datastream == nil {
-				headers.Flags |= FENDSTREAM
+				flags |= FENDSTREAM
 			}
 
-			if err = h.serializer.Write(headers, []byte{136}); err != nil {
+			if err = h.serializer.Write(HEADERS, flags, frame.Stream, []byte{136}); err != nil {
 				return Frame{}, err
 			}
 
 			if datastream != nil {
-				if err = h.serializer.WriteStream(data, response.Expose().Stream); err != nil {
+				if err = h.serializer.WriteStream(frame.Stream, response.Expose().Stream); err != nil {
 					return Frame{}, err
 				}
 			}
 
 			request.Reset()
-			if err = request.Body.Discard(); err != nil {
-				return Frame{}, err
-			}
-
 			h.ReacquireConn()
-			/*
-				h.writeFrame(HEADERS, FENDHEADERS, 1, frame.Stream)
-				h.Client.Write([]byte{136})
-				h.writeFrame(DATA, FENDSTREAM, 17, frame.Stream)
-				h.Client.Write([]byte("Hello via HTTP/2!"))
-				fmt.Println("the stream is over. Responded.")
-			*/
 		case PRIORITY:
 			// deprecated; skip
 			if err = h.readPriority(frame); err != nil {
@@ -279,9 +268,26 @@ func (h *HTTP2) Process(me *worker) (Frame, error) {
 				return frame, &Error{Stream: false, Code: PROTOCOLERROR}
 			}
 
+			_, err := h.readRstStream(frame)
+			if err != nil {
+				return frame, err
+			}
+
 			// todo if there's a worker dedicated, set its flag to "RESET_STREAM"
 		case SETTINGS:
+			if frame.Is(FACK) {
+				if frame.Length > 0 {
+					return frame, &Error{false, FRAMESIZEERROR}
+				}
+
+				continue
+			}
+
 			if err = h.readSettings(frame); err != nil {
+				return frame, err
+			}
+
+			if err = h.serializer.Write(SETTINGS, FACK, 0, nil); err != nil {
 				return frame, err
 			}
 		case PING:
@@ -298,13 +304,7 @@ func (h *HTTP2) Process(me *worker) (Frame, error) {
 				return frame, err
 			}
 
-			pingback := Frame{
-				Type:   PING,
-				Flags:  FACK,
-				Length: 8,
-				Stream: frame.Stream,
-			}
-			if err = h.serializer.Write(pingback, data[:]); err != nil {
+			if err = h.serializer.Write(PING, FACK, frame.Stream, data[:]); err != nil {
 				return frame, err
 			}
 		case GOAWAY:
@@ -314,6 +314,7 @@ func (h *HTTP2) Process(me *worker) (Frame, error) {
 			}
 
 			fmt.Println("going away!", lastStream, errcode, strconv.Quote(debug))
+			h.client.Close()
 		case WINDOWUPDATE:
 			increment, err := h.readWindowUpdate(frame)
 			if err != nil {
@@ -335,6 +336,14 @@ func (h *HTTP2) Process(me *worker) (Frame, error) {
 }
 
 func (h *HTTP2) rerouteData(worker *worker, frame Frame) (err error) {
+	if worker.State.Is(wstateEndstream) {
+		if err = h.client.Skip(frame.Length); err != nil {
+			return err
+		}
+
+		return &Error{Stream: true, Code: STREAMCLOSED}
+	}
+
 	h.client.Bump(FrameOctets)
 	segment := h.client.Tail(FrameOctets)
 	n := 0
@@ -364,9 +373,12 @@ func (h *HTTP2) rerouteData(worker *worker, frame Frame) (err error) {
 		}
 	}
 
-	// todo i really must set a flag ENDSTREAM.
 	worker.Mailbox = append(worker.Mailbox, h.client.Tail(FrameOctets+n))
 	worker.Mu.Unlock()
+	if frame.Is(FENDSTREAM) {
+		worker.State.Set(wstateNoData)
+	}
+
 	return nil
 }
 
@@ -579,19 +591,19 @@ func (h *HTTP2) readHeaders(frame Frame, request *http.Request) (err error) {
 		length -= priorityOctets
 	}
 
-	h.client.Limit(length)
-	for {
-		pair, err := h.readHeader()
-		switch err {
-		case nil:
-		case ErrLimit:
-			return h.client.Skip(padding)
-		default:
-			return err
+	if length < 0 {
+		return &Error{Stream: false, Code: PROTOCOLERROR}
+	}
+
+	client := newLimitedClient(&h.client, length)
+	for client.Remains() > 0 {
+		pair, err := h.dtable.Read(&client)
+		if err != nil {
+			return &Error{Stream: false, Code: COMPRESSIONERROR}
 		}
 
 		if pair.Empty() {
-			// it might have been just the decoder table resizing. It yields no pair.
+			// it's just the decoder resizing.
 			continue
 		}
 
@@ -612,132 +624,8 @@ func (h *HTTP2) readHeaders(frame Frame, request *http.Request) (err error) {
 
 		request.Headers.Add(pair.Key, pair.Value)
 	}
-}
 
-func (h *HTTP2) readHeader() (kv.Pair, error) {
-	const (
-		indexed                byte = 0x80
-		indexedLiteral         byte = 0x40
-		dynamicTableSizeUpdate byte = 0x20
-		neverIndexedLiteral    byte = 0x10
-	)
-
-	b, err := h.client.ReadByte()
-	if err != nil {
-		return kv.Pair{}, err
-	}
-
-	switch {
-	case b&indexed != 0:
-		// full key-value pair in the decoder table. Index = IntRepr 7+. Index 0 = decoding error
-		index, err := h.readIntRepr(b, 7)
-		if err != nil {
-			return kv.Pair{}, err
-		}
-
-		if index == 0 {
-			return kv.Pair{}, &Error{false, COMPRESSIONERROR}
-		}
-
-		pair, ok := h.dtable.Decode(index)
-		if !ok {
-			return kv.Pair{}, &Error{false, COMPRESSIONERROR}
-		}
-
-		return pair, nil
-	case b&indexedLiteral != 0:
-		pair, err := h.readIndexedField(b)
-		if err == nil {
-			h.dtable.Insert(pair.Key, pair.Value)
-		}
-
-		return pair, err
-	case b&dynamicTableSizeUpdate != 0:
-		newsize, err := h.readIntRepr(b, 5)
-		if err != nil {
-			return kv.Pair{}, err
-		}
-
-		if newsize > h.settings[SHEADERTABLESIZE] {
-			return kv.Pair{}, &Error{false, COMPRESSIONERROR}
-		}
-
-		h.dtable.Resize(newsize)
-		return kv.Pair{}, nil
-	case b&neverIndexedLiteral != 0:
-		// todo does the user want to know whether a field is never-indexed? Or simply store it somewhere internally?
-		return h.readIndexedField(b)
-	default:
-		// Literal Header Field without Indexing
-		return h.readIndexedField(b)
-	}
-}
-
-func (h *HTTP2) readIndexedField(intro byte) (kv.Pair, error) {
-	index, err := h.readIntRepr(intro, 6)
-	if err != nil {
-		return kv.Pair{}, err
-	}
-
-	var key, value string
-
-	if index == 0 {
-		key, err = h.readLiteral()
-		if err != nil {
-			return kv.Pair{}, err
-		}
-	} else {
-		entry, ok := h.dtable.Decode(index)
-		if !ok {
-			return kv.Pair{}, &Error{false, COMPRESSIONERROR}
-		}
-
-		key = entry.Key
-	}
-
-	value, err = h.readLiteral()
-
-	return kv.Pair{Key: key, Value: value}, err
-}
-
-func (h *HTTP2) readLiteral() (string, error) {
-	/*
-	     0   1   2   3   4   5   6   7
-	   +---+---+---+---+---+---+---+---+
-	   | H |    String Length (7+)     |
-	   +---+---------------------------+
-	   |  String Data (Length octets)  |
-	   +-------------------------------+
-	*/
-
-	intro, err := h.client.ReadByte()
-	if err != nil {
-		return "", err
-	}
-
-	length, err := h.readIntRepr(intro, 7)
-	if err != nil {
-		return "", err
-	}
-
-	// todo: limit the maximal string length
-
-	literal := make([]byte, length)
-	if err = h.client.ReadFull(literal); err != nil {
-		return "", err
-	}
-
-	if intro&0x80 != 0 {
-		buff := make([]byte, 0, length*2)
-		decompressed, ok := hpack.Decompress(literal, buff)
-		if !ok {
-			return "", &Error{true, COMPRESSIONERROR}
-		}
-
-		literal = decompressed
-	}
-
-	return uf.B2S(literal), nil
+	return h.client.Skip(padding)
 }
 
 func (h *HTTP2) readSettings(frame Frame) error {
@@ -761,37 +649,25 @@ func (h *HTTP2) readSettings(frame Frame) error {
 		}
 	*/
 
-	if frame.Flags&FACK != 0 {
-		if frame.Length > 0 {
-			return &Error{false, FRAMESIZEERROR}
-		}
-	}
-
 	if frame.Stream != 0 {
 		return &Error{false, PROTOCOLERROR}
 	}
 
-	const pair = 2 + 4
-	i := frame.Length
-	for ; i >= pair; i -= pair {
-		var setting [pair]byte
-		err := h.client.ReadFull(setting[:])
-		if err != nil {
+	r := newLimitedClient(&h.client, int(frame.Length))
+	for r.Remains() > 0 {
+		var setting [settingPairOctets]byte
+		if err := r.ReadFull(setting[:]); err != nil {
 			return err
 		}
 
-		key := binary.BigEndian.Uint16(setting[:2])
+		key := binary.BigEndian.Uint16(setting[0:2])
 		value := binary.BigEndian.Uint32(setting[2:6])
 
-		if key >= uint16(len(h.settings)) {
+		if key == 0 || key >= uint16(len(h.settings)) {
 			continue
 		}
 
 		h.settings[key] = value
-	}
-
-	if i > 0 {
-		return &Error{false, PROTOCOLERROR}
 	}
 
 	return nil
@@ -804,33 +680,6 @@ func (h *HTTP2) readu32be() (uint32, error) {
 	}
 
 	return binary.BigEndian.Uint32(num[:]), nil
-}
-
-func (h *HTTP2) readIntRepr(prefix byte, prefixlen int) (num uint32, err error) {
-	mask := byte(1)<<prefixlen - 1
-	prefix &= mask
-	if prefix < mask {
-		return uint32(prefix), nil
-	}
-
-	shift := 0
-	for range 3 {
-		b, err := h.client.ReadByte()
-		if err != nil {
-			return 0, err
-		}
-
-		num = (uint32(b&0x7f) << shift) | num
-		if b&0x80 == 0 {
-			return num + uint32(prefix), nil
-		}
-
-		shift += 7
-	}
-
-	// stop reading after 8 bytes (full uint64).
-	// fixme: malformed intrepr is a protocol error? Stream or connection error?
-	return 0, &Error{true, PROTOCOLERROR}
 }
 
 func (h *HTTP2) readPreface() error {

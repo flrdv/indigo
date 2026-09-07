@@ -8,13 +8,15 @@ import (
 )
 
 const (
-	wstateFrameread uint8 = iota
+	wstate0 uint8 = iota
+	wstateFrameread
 	wstateEndstream
+	wstateNoData
 )
 
 // worker is an assignation of a goroutine to a particular request.
 type worker struct {
-	state    bit.Map8
+	State    bit.Map8
 	ID       uint32
 	h2       *HTTP2
 	Mu       sync.Mutex
@@ -33,16 +35,21 @@ func newWorker(id uint32, h2 *HTTP2) *worker {
 	}
 }
 
-func (w *worker) Init() {
-	w.Mu.Lock()
-	w.state.Clear()
-	w.h2.client.AddSource(w.Mailbox, w.C)
-}
-
 func (w *worker) Fetch() ([]byte, error) {
+	if w.State.Is(wstateNoData) {
+		return nil, io.EOF
+	}
+
+	if !w.State.Is(wstate0) {
+		w.State.Clear()
+		w.State.Set(wstate0)
+		w.Mu.Lock()
+		w.h2.client.AddSource(w.Mailbox, w.C)
+	}
+
 begin:
-	if !w.state.Is(wstateFrameread) {
-		w.state.Set(wstateFrameread)
+	if !w.State.Is(wstateFrameread) {
+		w.State.Set(wstateFrameread)
 
 		frame, err := w.h2.Process(w)
 		if err != nil {
@@ -81,7 +88,7 @@ begin:
 				w.framelen -= uint32(b) + 1
 			}
 			if frame.Is(FENDSTREAM) {
-				w.state.Set(wstateEndstream)
+				w.State.Set(wstateEndstream)
 			}
 		// todo: handle RST_STREAM
 		// todo: handle HEADERS
@@ -102,10 +109,11 @@ begin:
 		return nil, err
 	}
 
-	w.state.Unset(wstateFrameread)
+	w.State.Unset(wstateFrameread)
 
-	if w.state.Is(wstateEndstream) {
+	if w.State.Is(wstateEndstream) {
 		// todo peek the next frame, it might be HEADERS carrying trailer
+		w.Mu.Unlock()
 		return nil, io.EOF
 	}
 

@@ -2,7 +2,10 @@ package http2
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
+
+	"github.com/indigo-web/indigo/config"
 )
 
 //go:generate stringer -type=FrameType
@@ -54,13 +57,13 @@ func (f Frame) Is(flag byte) bool {
 	return f.Flags&flag != 0
 }
 
-// AltersState tells whether the frame alters a connection's state.
+// AltersState tells whether the frame alters a connection's State.
 func (f Frame) AltersState() bool {
 	// https://datatracker.ietf.org/doc/html/rfc9113#section-4.2-4:
 	// An endpoint MUST send an error code of FRAME_SIZE_ERROR if a frame exceeds
 	// the size defined in SETTINGS_MAX_FRAME_SIZE, exceeds any limit defined for
 	// the frame type, or is too small to contain mandatory frame data. A frame
-	// size error in a frame that could alter the state of the entire connection
+	// size error in a frame that could alter the State of the entire connection
 	// MUST be treated as a connection error (Section 5.4.1); this includes any
 	// frame carrying a field block (Section 4.3) (that is, HEADERS, PUSH_PROMISE,
 	// and CONTINUATION), a SETTINGS frame, and any frame with a stream identifier of 0.
@@ -73,7 +76,7 @@ func (f Frame) AltersState() bool {
 	return f.Stream == 0
 }
 
-func (f Frame) Serialize() [FrameOctets]byte {
+func (f Frame) ToBytes() [FrameOctets]byte {
 	return [FrameOctets]byte{
 		byte(f.Length >> 16),
 		byte(f.Length >> 8),
@@ -113,10 +116,10 @@ type Error struct {
 
 func (e Error) Error() string {
 	if e.Stream {
-		return "stream error"
+		return fmt.Sprintf("stream error (errcode=%d)", e.Code)
 	}
 
-	return "connection error"
+	return fmt.Sprintf("connection error (errcode=%d)", e.Code)
 }
 
 const (
@@ -137,4 +140,31 @@ var defaultSettings = Settings{
 	SINITIALWINDOWSIZE:    1<<16 - 1,
 	SMAXFRAMESIZE:         1 << 14,
 	SMAXHEADERLISTSIZE:    math.MaxUint32,
+}
+
+func SettingsFrom(cfg config.HTTP2) Settings {
+	return Settings{
+		SHEADERTABLESIZE:      cfg.HeaderTableSize,
+		SENABLEPUSH:           0,
+		SMAXCONCURRENTSTREAMS: cfg.MaxConcurrentStreams,
+		SINITIALWINDOWSIZE:    cfg.WindowBuffer, // todo make it a bit smaller? Considering frame headers are included.
+		SMAXFRAMESIZE:         cfg.MaxFrameSize,
+		SMAXHEADERLISTSIZE:    cfg.MaxHeaderListSize,
+	}
+}
+
+const (
+	settingPairOctets = 2 + 4
+	settingsOctets    = (len(Settings{}) - 1) * settingPairOctets
+)
+
+func (s Settings) ToBytes() (serialized [settingsOctets]byte) {
+	vals := serialized[:0]
+
+	for i, val := range s[1:] {
+		vals = binary.BigEndian.AppendUint16(vals, uint16(i+1))
+		vals = binary.BigEndian.AppendUint32(vals, val)
+	}
+
+	return serialized
 }
