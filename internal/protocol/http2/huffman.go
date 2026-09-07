@@ -1,4 +1,4 @@
-package hpack
+package http2
 
 import "encoding/binary"
 

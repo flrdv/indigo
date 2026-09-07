@@ -1,4 +1,4 @@
-package hpack
+package http2
 
 import (
 	"slices"
@@ -20,10 +20,10 @@ func (p Pair) Len() int {
 }
 
 type storage struct {
-	cached  bool   // tells whether the wrapped contents are still valid
-	head    int    // where the most recent entry in data ends
-	wrapped []byte // holds a string in case it must be split into two (wraps in the data)
-	data    []byte
+	cached   bool   // tells whether the boundary contents are still valid
+	head     int    // where the most recent entry in data ends
+	boundary []byte // due to ring-buffer-nature of data, some value might be halved.
+	data     []byte
 }
 
 func newStorage(size uint32) storage {
@@ -37,7 +37,7 @@ func (s *storage) Write(data string) Tag {
 
 	n := copy(s.data[s.head:], data)
 	if n < len(data) {
-		// if the string is wrapped, invalidate the s.wrapped contents
+		// if the string is boundary, invalidate the s.boundary contents
 		n += copy(s.data, data[n:])
 		s.cached = false
 	}
@@ -57,15 +57,15 @@ func (s *storage) Read(tag Tag) string {
 	}
 
 	if s.cached {
-		return uf.B2S(s.wrapped)
+		return uf.B2S(s.boundary)
 	}
 
-	s.wrapped = slices.Grow(s.wrapped[:0], tag.len)
-	s.wrapped = append(s.wrapped, s.data[tag.offset:]...)
-	s.wrapped = append(s.wrapped, s.data[:tag.offset+tag.len-len(s.data)]...)
+	s.boundary = slices.Grow(s.boundary[:0], tag.len)
+	s.boundary = append(s.boundary, s.data[tag.offset:]...)
+	s.boundary = append(s.boundary, s.data[:tag.offset+tag.len-len(s.data)]...)
 	s.cached = true
 
-	return uf.B2S(s.wrapped)
+	return uf.B2S(s.boundary)
 }
 
 func (s *storage) Cap() uint32 {
@@ -87,10 +87,6 @@ func NewTable(capacity uint32) Table {
 		storage: newStorage(capacity),
 		queue:   make([]Pair, topQueueSize(capacity)),
 	}
-}
-
-func NewPair(capacity uint32) (Table, Table) {
-	return NewTable(capacity), NewTable(capacity)
 }
 
 const entryOverhead = 32
@@ -130,14 +126,157 @@ func (t *Table) evict() {
 	}
 }
 
-func (t *Table) Encode(key, value string) (index uint32, fieldType uint8) {
-	// 1. check whether key-value is a classic pair (whether it's in the static table).
-	// 2. check whether the full pair can be encoded via the dynamic table.
-	// 3. check whether at least key can be encoded via the dynamic table.
-	// 4. for literal keys and/or values exceeding, say, 128 bytes of length: compress with huffman.
+func (t *Table) Read(client *limitedClient) (kv.Pair, error) {
+	const (
+		indexed                byte = 0x80
+		indexedLiteral         byte = 0x40
+		dynamicTableSizeUpdate byte = 0x20
+		neverIndexedLiteral    byte = 0x10
+	)
 
-	// now implement this. Good luck!
-	panic("implement me")
+	b, err := client.ReadByte()
+	if err != nil {
+		return kv.Pair{}, err
+	}
+
+	switch {
+	case b&indexed != 0:
+		// full key-value pair in the decoder table. Index = IntRepr 7+. Index 0 = decoding error
+		index, err := t.readIntRepr(client, b, 7)
+		if err != nil {
+			return kv.Pair{}, err
+		}
+
+		if index == 0 {
+			return kv.Pair{}, &Error{false, COMPRESSIONERROR}
+		}
+
+		pair, ok := t.Decode(index)
+		if !ok {
+			return kv.Pair{}, &Error{false, COMPRESSIONERROR}
+		}
+
+		return pair, nil
+	case b&indexedLiteral != 0:
+		pair, err := t.readIndexedField(client, b)
+		if err == nil {
+			t.Insert(pair.Key, pair.Value)
+		}
+
+		return pair, err
+	case b&dynamicTableSizeUpdate != 0:
+		newsize, err := t.readIntRepr(client, b, 5)
+		if err != nil {
+			return kv.Pair{}, err
+		}
+
+		if newsize > t.cap {
+			return kv.Pair{}, &Error{false, COMPRESSIONERROR}
+		}
+
+		t.Resize(newsize)
+		return kv.Pair{}, nil
+	case b&neverIndexedLiteral != 0:
+		// todo is the client willing to know whether some field is never-indexed?
+		return t.readIndexedField(client, b)
+	default:
+		// Literal Header Field without Indexing
+		return t.readIndexedField(client, b)
+	}
+}
+
+func (t *Table) readIndexedField(client *limitedClient, intro byte) (kv.Pair, error) {
+	index, err := t.readIntRepr(client, intro, 6)
+	if err != nil {
+		return kv.Pair{}, err
+	}
+
+	var key, value string
+
+	if index == 0 {
+		key, err = t.readLiteral(client)
+		if err != nil {
+			return kv.Pair{}, err
+		}
+	} else {
+		entry, ok := t.Decode(index)
+		if !ok {
+			return kv.Pair{}, &Error{false, COMPRESSIONERROR}
+		}
+
+		key = entry.Key
+	}
+
+	value, err = t.readLiteral(client)
+
+	return kv.Pair{Key: key, Value: value}, err
+}
+
+func (t *Table) readLiteral(client *limitedClient) (string, error) {
+	/*
+	     0   1   2   3   4   5   6   7
+	   +---+---+---+---+---+---+---+---+
+	   | H |    String Length (7+)     |
+	   +---+---------------------------+
+	   |  String Data (Length octets)  |
+	   +-------------------------------+
+	*/
+
+	intro, err := client.ReadByte()
+	if err != nil {
+		return "", err
+	}
+
+	length, err := t.readIntRepr(client, intro, 7)
+	if err != nil {
+		return "", err
+	}
+
+	// todo: limit the maximal string length
+
+	literal := make([]byte, length)
+	if err = client.ReadFull(literal); err != nil {
+		return "", err
+	}
+
+	if intro&0x80 != 0 {
+		buff := make([]byte, 0, length*2)
+		decompressed, ok := Decompress(literal, buff)
+		if !ok {
+			return "", &Error{true, COMPRESSIONERROR}
+		}
+
+		literal = decompressed
+	}
+
+	return uf.B2S(literal), nil
+}
+
+func (t *Table) readIntRepr(client *limitedClient, prefix byte, prefixlen int) (num uint32, err error) {
+	mask := byte(1)<<prefixlen - 1
+	prefix &= mask
+	if prefix < mask {
+		return uint32(prefix), nil
+	}
+
+	shift := 0
+	for range 3 {
+		b, err := client.ReadByte()
+		if err != nil {
+			return 0, err
+		}
+
+		num = (uint32(b&0x7f) << shift) | num
+		if b&0x80 == 0 {
+			return num + uint32(prefix), nil
+		}
+
+		shift += 7
+	}
+
+	// stop reading after 8 bytes (full uint64).
+	// fixme: malformed intrepr is a protocol error? Stream or connection error?
+	return 0, &Error{true, PROTOCOLERROR}
 }
 
 // Decode returns a pair corresponding the given index.

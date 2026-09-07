@@ -1,4 +1,4 @@
-package hpack
+package http2
 
 import (
 	"strings"
@@ -18,7 +18,7 @@ func TestStorage(t *testing.T) {
 		require.Equal(t, "world", s.Read(world))
 	})
 
-	t.Run("wrapped", func(t *testing.T) {
+	t.Run("boundary", func(t *testing.T) {
 		s := newStorage(10)
 		hello := s.Write("hello")
 		world := s.Write("world!")
@@ -26,7 +26,7 @@ func TestStorage(t *testing.T) {
 		require.Equal(t, "world!", s.Read(world))
 	})
 
-	t.Run("cached wrapped", func(t *testing.T) {
+	t.Run("cached boundary", func(t *testing.T) {
 		s := newStorage(10)
 		hello := s.Write("hello")
 		world := s.Write("world!")
